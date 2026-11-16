@@ -1,0 +1,154 @@
+# Qorovul configuration
+# ---------------------
+# Location: /etc/qorovul/config.yml   (override with -c PATH or $QOROVUL_CONFIG)
+#
+# Every key is optional and shows its default below. Unknown keys are an
+# error, so a typo fails at startup instead of silently doing nothing.
+# Validate your edits with:   qorovul test
+#
+# Durations accept plain seconds (30) or a suffix: 30s, 10m, 6h, 1d.
+
+# Name shown at the top of every Telegram message. Empty = system hostname.
+hostname: ""
+
+# How often checks run. Individual checks can override this (see "interval"
+# under each check). Minimum 5s.
+interval: 30s
+
+# Where alert state lives. It survives restarts so you are not re-alerted
+# for things you already know about. Must be writable by the service user.
+state_file: /var/lib/qorovul/state.json
+
+# debug | info | warning | error   (logs go to the journal: journalctl -u qorovul)
+log_level: info
+
+telegram:
+  # Bot token from @BotFather, e.g. "123456789:AAE...". Prefer the
+  # QOROVUL_BOT_TOKEN environment variable if you do not want it on disk;
+  # the env var wins over this value.
+  bot_token: ""
+  # Chat to send to: your user id, a group id (negative, e.g. -1001234567890)
+  # or "@channelname". Env override: QOROVUL_CHAT_ID.
+  # Tip: message your bot, then open
+  #   https://api.telegram.org/bot<TOKEN>/getUpdates  and read "chat":{"id":...}
+  chat_id: ""
+  # HTTP timeout per request. Failed sends are retried 3 times (honouring
+  # Telegram rate limits) and then again on the next cycle.
+  timeout: 10s
+  # Change only if you reach Telegram through a proxy/mirror.
+  api_url: https://api.telegram.org
+
+alerts:
+  # Lowest severity that is sent: info | warning | critical.
+  min_severity: warning
+  # A condition alerts ONCE when it starts. While it keeps failing you get a
+  # "STILL FAILING" reminder only after this long. Escalation (e.g. warning ->
+  # critical) is sent immediately regardless of cooldown. 0 = remind every cycle.
+  cooldown: 6h
+  # A failing condition must look healthy this many consecutive runs of its
+  # check before it is declared RECOVERED. 2 stops flapping values (e.g. a disk
+  # hovering around 85%) from producing alert/recovered pairs.
+  recovery_cycles: 2
+  # Send a RECOVERED message when a condition you were alerted about clears.
+  # You never get a RECOVERED for something you were not alerted about.
+  send_recovery: true
+  # During quiet hours only critical alerts are delivered. Warnings (and
+  # their recoveries) are held, and delivered when quiet hours end if the
+  # condition is still relevant. Times are the server's local time and the
+  # window may cross midnight.
+  quiet_hours:
+    enabled: false
+    start: "23:00"
+    end: "07:00"
+
+# ---------------------------------------------------------------------------
+# Checks. Every check accepts these common keys in addition to its own:
+#   enabled:       true | false
+#   interval:      how often this check runs (default: the global interval;
+#                  ssl defaults to 1h)
+#   cooldown:      override alerts.cooldown for this check
+#   send_recovery: override alerts.send_recovery for this check
+# ---------------------------------------------------------------------------
+checks:
+
+  # Alert when a mounted filesystem is at least `threshold` percent full.
+  # Key: disk:<mountpoint>
+  disk:
+    enabled: true
+    threshold: 85            # warning at >= 85%
+    critical_threshold: 95   # critical at >= 95% (null = never critical)
+    # Only watch these mountpoints (empty = all real filesystems).
+    mountpoints: []
+    # Ignored when `mountpoints` is empty:
+    exclude_fstypes: [tmpfs, devtmpfs, squashfs, overlay, iso9660, ramfs, autofs, nsfs, fuse.lxcfs]
+    exclude_mountpoints: [/snap, /var/lib/docker]   # also excludes everything below them
+
+  # Alert when RAM usage (excluding reclaimable page cache) stays at or above
+  # `threshold` percent for `sustained_cycles` consecutive runs.
+  # Key: memory:ram
+  memory:
+    enabled: true
+    threshold: 90
+    critical_threshold: 97   # null = never critical
+    sustained_cycles: 3      # 3 x 30s = 90s of sustained pressure
+
+  # Alert when a systemd unit is not active (failed, inactive, activating...).
+  # Names without a suffix get ".service". Key: service:<unit>
+  service:
+    enabled: true
+    units: []
+    #  - nginx
+    #  - postgresql
+    #  - docker.service
+    #  - backup.timer
+    severity: critical
+
+  # Alert when one IP reaches `failures` failed SSH logins within `window`.
+  # Key: ssh:<ip>
+  ssh:
+    enabled: true
+    # auto    = first readable file in log_paths, else the systemd journal
+    # file    = only log_paths       journal = only journald (ssh/sshd units)
+    source: auto
+    log_paths: [/var/log/auth.log, /var/log/secure]
+    failures: 20
+    window: 10m
+    severity: warning
+    # IPs / CIDR ranges never alerted on (your office, monitoring, ...).
+    ignore_ips: []
+    #  - 192.0.2.10
+    #  - 10.0.0.0/8
+    # Internet-facing servers see many bots; if one alert per attacking IP is
+    # enough for you, silence the matching RECOVERED messages:
+    # send_recovery: false
+
+  # Alert when a TLS certificate expires within `warn_days` (warning) or
+  # `critical_days` (critical). An invalid/expired certificate is critical.
+  # Entries are host names, optionally host:port (default 443).
+  # Key: ssl:<host> or ssl:<host>:<port>
+  ssl:
+    enabled: true
+    domains: []
+    #  - example.com
+    #  - mail.example.com:993
+    warn_days: 14
+    critical_days: 3
+    timeout: 10s
+    # Severity when the host cannot be reached at all.
+    connect_error_severity: warning
+    interval: 1h
+
+  # Alert when a TCP port is listening that is not allowlisted.
+  # Entries: a port (any address) or "address:port" (exact bind address).
+  # Key: ports:tcp/<port>
+  ports:
+    enabled: true
+    allowed:
+      - 22
+    #  - 80
+    #  - 443
+    #  - "127.0.0.1:5432"
+    # Ignore listeners bound only to 127.0.0.0/8 or ::1 (not reachable from
+    # outside). Set false to also watch local-only services.
+    ignore_loopback: true
+    severity: warning

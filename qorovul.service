@@ -1,0 +1,55 @@
+[Unit]
+Description=Qorovul server watchdog (Telegram alerts)
+Documentation=https://github.com/Qoshmurod/Security-
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qorovul
+Group=qorovul
+# Read access to auth.log / the journal comes from the qorovul user's
+# supplementary groups (adm, systemd-journal), added by install.sh.
+ExecStart=/opt/qorovul/venv/bin/qorovul run
+Restart=on-failure
+RestartSec=15
+# Exit code 2 = invalid configuration: restarting will not fix it.
+RestartPreventExitStatus=2
+Environment=PYTHONUNBUFFERED=1
+# Optional: QOROVUL_BOT_TOKEN=... / QOROVUL_CHAT_ID=... (keep it mode 0600).
+EnvironmentFile=-/etc/qorovul/qorovul.env
+
+# /var/lib/qorovul, writable only by the service user.
+StateDirectory=qorovul
+StateDirectoryMode=0750
+UMask=0077
+
+# Hardening: no privileges, read-only view of the system.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+# read-only (not "yes") so disk usage of a separate /home is still visible.
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+# Resource ceilings (normal RSS is ~30 MB).
+MemoryMax=128M
+TasksMax=32
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
