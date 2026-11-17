@@ -8,6 +8,7 @@ import time
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .checks import Check, CheckResult, build_checks
+from .i18n import EN, Translator, get_translator
 from .state import AlertEngine, Event, Policy, StateStore
 
 log = logging.getLogger(__name__)
@@ -54,8 +55,8 @@ def _http_get(url: str, timeout: float) -> int:
     return requests.get(url, timeout=timeout, headers={"User-Agent": "qorovul"}).status_code
 
 
-def run_check(check: Check, last_errors: Optional[Dict[str, str]] = None
-              ) -> Tuple[List[CheckResult], bool]:
+def run_check(check: Check, last_errors: Optional[Dict[str, str]] = None,
+              tr: Translator = EN) -> Tuple[List[CheckResult], bool]:
     """Run one check, converting exceptions into a failing ``<name>:error`` result.
 
     Returns (results, complete).  ``complete`` is False when the check raised,
@@ -66,7 +67,7 @@ def run_check(check: Check, last_errors: Optional[Dict[str, str]] = None
     try:
         results = list(check.run())
     except Exception as exc:  # a broken check must never kill the watchdog
-        msg = "%s check could not run: %s" % (check.name, exc)
+        msg = tr("check.error", check=check.name, error=exc)
         if last_errors is None or last_errors.get(check.name) != msg:
             log.exception("check %s failed", check.name)
         else:
@@ -89,6 +90,7 @@ class Runner:
                  notify: Callable[[str], bool] = sd_notify) -> None:
         self.config = config
         self.notifier = notifier
+        self.tr = get_translator(config.get("language", "en"))
         self.checks = list(checks) if checks is not None else build_checks(config)
         self.store = store or StateStore(config["state_file"])
         # Wall clock for timestamps shown to people; monotonic clock for
@@ -120,10 +122,10 @@ class Runner:
         return due
 
     @staticmethod
-    def _cleared(check: Check) -> Callable[[str], str]:
+    def _cleared(check: Check, tr: Translator = EN) -> Callable[[str], str]:
         def message(key: str) -> str:
             if key == "%s:error" % check.name:
-                return "%s check is running normally again" % check.name
+                return tr("check.recovered", check=check.name)
             return check.cleared_message(key)
         return message
 
@@ -132,10 +134,10 @@ class Runner:
         now = self.clock()
         mono = self.monotonic()
         for check in self.due_checks(mono):
-            results, complete = run_check(check, self.last_errors)
+            results, complete = run_check(check, self.last_errors, self.tr)
             self.last_run[check.name] = mono
             self.engine.observe(check.name, results, now, complete=complete,
-                                cleared_message=self._cleared(check))
+                                cleared_message=self._cleared(check, self.tr))
         delivered = self._dispatch(now, mono)
         self.engine.prune(now)
         self.store.save(self.engine.records)

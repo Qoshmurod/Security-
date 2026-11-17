@@ -5,14 +5,6 @@ from typing import Any, Dict, List
 from .base import Check, CheckResult
 
 
-def _human(n: float) -> str:
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if abs(n) < 1024 or unit == "TB":
-            return "%.1f %s" % (n, unit) if unit != "B" else "%d B" % n
-        n /= 1024.0
-    return "%.1f PB" % n  # pragma: no cover
-
-
 class DiskCheck(Check):
     """Alert when a mounted filesystem's usage reaches the threshold."""
 
@@ -67,11 +59,11 @@ class DiskCheck(Check):
                     # a monitoring gap they need to hear about.
                     results.append(CheckResult(
                         "disk:" + mp, False, "warning",
-                        "cannot read disk usage of %s: %s" % (mp, exc.strerror or exc)))
+                        self.tr("disk.unreadable", mount=mp, error=exc.strerror or exc)))
                 continue  # auto-discovered: unmounted between listing and stat
             pct = float(usage.percent)
-            msg = "%s is %.1f%% full (%s free of %s)" % (
-                mp, pct, _human(usage.free), _human(usage.total))
+            msg = self.tr("disk.usage", mount=mp, percent=self.tr.percent(pct),
+                          free=self.tr.size(usage.free), total=self.tr.size(usage.total))
             if crit is not None and pct >= crit:
                 results.append(CheckResult("disk:" + mp, False, "critical", msg))
             elif pct >= warn:
@@ -81,4 +73,4 @@ class DiskCheck(Check):
         return results
 
     def cleared_message(self, key: str) -> str:
-        return "%s is no longer mounted" % key.split(":", 1)[1]
+        return self.tr("disk.unmounted", mount=key.split(":", 1)[1])

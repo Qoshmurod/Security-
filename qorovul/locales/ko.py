@@ -1,0 +1,60 @@
+"""한국어."""
+
+NAME = "한국어"
+DURATION_UNITS = {"d": "일", "h": "시간", "m": "분", "s": "초"}
+
+MESSAGES = {
+    "severity.info": "정보",
+    "severity.warning": "경고",
+    "severity.critical": "심각",
+    "event.recovered": "복구됨",
+    "event.still": "여전히 {severity}",
+    "event.escalated": "심각도 상승",
+    "footer.since": "시작: {time}",
+    "footer.was": "{severity} 상태가 {duration} 동안 지속됨",
+    "footer.failing_for": "{duration}째 지속 중 (시작: {time})",
+
+    "disk.usage": "{mount} 사용률 {percent} (여유 {free} / 전체 {total})",
+    "disk.unmounted": "{mount} 마운트 해제됨",
+    "disk.unreadable": "{mount} 디스크 사용량을 읽을 수 없음: {error}",
+    "memory.usage": "RAM 사용률 {percent} (사용 가능 {available} / 전체 {total})",
+    "service.state": "{unit} 상태: {state}",
+    "ssh.failures": "최근 {window} 동안 {ip}의 SSH 로그인 실패: {count}회",
+    "ssh.failures_users": "최근 {window} 동안 {ip}의 SSH 로그인 실패: {count}회 "
+                          "(사용자: {users})",
+    "ssh.cleared": "{ip}의 로그인 실패가 {window}당 {limit}회 미만으로 감소",
+    "ssl.expires": "{host} 인증서 만료일 {date}, 남은 일수: {days}",
+    "ssl.expired": "{host} 인증서가 {date}에 만료됨",
+    "ssl.invalid": "{host} 인증서가 유효하지 않음: {reason}",
+    "ssl.unreachable": "{host}:{port} 인증서를 확인할 수 없음: {error}",
+    "ports.unexpected": "예상치 못한 TCP 수신 대기 포트 {port} ({addresses})",
+    "ports.user": "사용자 {users}",
+    "ports.process": "프로세스 {processes}",
+    "ports.cleared": "TCP 포트 {port} 수신 대기 종료",
+    "check.error": "{check} 검사를 실행할 수 없음: {error}",
+    "check.recovered": "{check} 검사가 다시 정상 실행됨",
+    "check.cleared": "해당 상태가 더 이상 없음",
+
+    "test.title": "Qorovul 테스트 메시지 (v{version})",
+    "test.summary": "실행한 검사: {checks}, 문제: {failing}, 오류: {errors}",
+    "test.nothing": "보고할 내용 없음",
+    "test.no_checks": "활성화된 검사 없음",
+    "test.sent": "telegram: 테스트 메시지 전송됨",
+    "test.send_failed": "telegram: 테스트 메시지 전송 실패 (위 로그 참조)",
+
+    "status.empty": "아직 상태 정보 없음 ({path})",
+    "status.summary": "상태: {path} (키: {keys}, 문제: {failing})",
+    "status.col.key": "키",
+    "status.col.status": "상태",
+    "status.col.severity": "심각도",
+    "status.col.since": "시작",
+    "status.col.last": "마지막 알림",
+    "status.col.message": "메시지",
+    "status.failing": "문제",
+    "status.ok": "정상",
+    "status.pending": "* 복구됨, 복구 메시지는 아직 전송되지 않음",
+    "kind.alert": "알림",
+    "kind.escalated": "상승",
+    "kind.reminder": "재알림",
+    "kind.recovered": "복구",
+}

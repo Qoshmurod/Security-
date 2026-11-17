@@ -1,0 +1,60 @@
+"""हिन्दी."""
+
+NAME = "हिन्दी"
+DURATION_UNITS = {"d": " दिन", "h": " घं", "m": " मि", "s": " से"}
+
+MESSAGES = {
+    "severity.info": "सूचना",
+    "severity.warning": "चेतावनी",
+    "severity.critical": "गंभीर",
+    "event.recovered": "ठीक हुआ",
+    "event.still": "अब भी {severity}",
+    "event.escalated": "गंभीरता बढ़ी",
+    "footer.since": "{time} से",
+    "footer.was": "{duration} तक {severity} रहा",
+    "footer.failing_for": "{duration} से जारी ({time} से)",
+
+    "disk.usage": "{mount} {percent} भरा है ({total} में से {free} खाली)",
+    "disk.unmounted": "{mount} अब माउंट नहीं है",
+    "disk.unreadable": "{mount} का डिस्क उपयोग पढ़ा नहीं जा सका: {error}",
+    "memory.usage": "RAM उपयोग {percent} ({total} में से {available} उपलब्ध)",
+    "service.state": "{unit}: स्थिति {state}",
+    "ssh.failures": "पिछले {window} में {ip} से विफल SSH लॉगिन: {count}",
+    "ssh.failures_users": "पिछले {window} में {ip} से विफल SSH लॉगिन: {count} "
+                          "(उपयोगकर्ता: {users})",
+    "ssh.cleared": "{ip} से विफल लॉगिन प्रति {window} {limit} से कम हो गए",
+    "ssl.expires": "{host} का प्रमाणपत्र {date} को समाप्त होगा, शेष दिन: {days}",
+    "ssl.expired": "{host} का प्रमाणपत्र {date} को समाप्त हो गया",
+    "ssl.invalid": "{host} का प्रमाणपत्र अमान्य है: {reason}",
+    "ssl.unreachable": "{host}:{port} का प्रमाणपत्र जाँचा नहीं जा सका: {error}",
+    "ports.unexpected": "पोर्ट {port} पर अनपेक्षित TCP लिसनर ({addresses})",
+    "ports.user": "उपयोगकर्ता {users}",
+    "ports.process": "प्रक्रिया {processes}",
+    "ports.cleared": "TCP पोर्ट {port} अब लिसन नहीं कर रहा",
+    "check.error": "{check} जाँच नहीं चल सकी: {error}",
+    "check.recovered": "{check} जाँच फिर से सामान्य रूप से चल रही है",
+    "check.cleared": "यह स्थिति अब मौजूद नहीं है",
+
+    "test.title": "Qorovul परीक्षण संदेश (v{version})",
+    "test.summary": "चलाई गई जाँचें: {checks}, समस्या वाली: {failing}, त्रुटियाँ: {errors}",
+    "test.nothing": "बताने लायक कुछ नहीं",
+    "test.no_checks": "कोई जाँच सक्षम नहीं है",
+    "test.sent": "telegram: परीक्षण संदेश भेजा गया",
+    "test.send_failed": "telegram: परीक्षण संदेश भेजा नहीं जा सका (ऊपर का लॉग देखें)",
+
+    "status.empty": "अभी कोई स्थिति नहीं ({path})",
+    "status.summary": "स्थिति: {path} (कुंजियाँ: {keys}, समस्या वाली: {failing})",
+    "status.col.key": "कुंजी",
+    "status.col.status": "स्थिति",
+    "status.col.severity": "गंभीरता",
+    "status.col.since": "कब से",
+    "status.col.last": "अंतिम सूचना",
+    "status.col.message": "संदेश",
+    "status.failing": "समस्या",
+    "status.ok": "ठीक",
+    "status.pending": "* ठीक हुआ, लेकिन 'ठीक हुआ' संदेश अभी भेजा नहीं गया",
+    "kind.alert": "अलर्ट",
+    "kind.escalated": "वृद्धि",
+    "kind.reminder": "अनुस्मारक",
+    "kind.recovered": "सुधार",
+}

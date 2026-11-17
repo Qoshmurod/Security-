@@ -32,9 +32,10 @@ PATTERNS = {
 def serve(port, log_path):
     class Handler(BaseHTTPRequestHandler):
         def _record(self, method, body=None):
-            with open(log_path, "a") as fh:
-                fh.write(json.dumps({"t": time.time(), "method": method,
-                                     "path": self.path, "body": body}) + "\n")
+            # Real UTF-8, not \\u escapes, so the test script can grep any language.
+            with open(log_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"t": time.time(), "method": method, "path": self.path,
+                                     "body": body}, ensure_ascii=False) + "\n")
 
         def _reply(self):
             data = b'{"ok":true,"result":{"message_id":1}}'
@@ -78,7 +79,7 @@ def tls(port, cert, key):
 
 def entries(log_path):
     try:
-        with open(log_path) as fh:
+        with open(log_path, encoding="utf-8") as fh:
             return [json.loads(line) for line in fh if line.strip()]
     except FileNotFoundError:
         return []

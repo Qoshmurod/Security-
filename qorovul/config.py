@@ -15,11 +15,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import yaml
 
 from .checks.base import SEVERITIES
+from .i18n import AUTO, LANGUAGES, resolve_language
 
 DEFAULT_CONFIG_PATH = "/etc/qorovul/config.yml"
 ENV_CONFIG = "QOROVUL_CONFIG"
 ENV_BOT_TOKEN = "QOROVUL_BOT_TOKEN"
 ENV_CHAT_ID = "QOROVUL_CHAT_ID"
+ENV_LANG = "QOROVUL_LANG"
 
 _DURATION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([smhd]?)\s*$")
 _UNITS = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
@@ -198,7 +200,10 @@ def _common(enabled: bool = True) -> Dict[str, Any]:
 
 SEVERITY = v_enum(*SEVERITIES)
 
+LANGUAGE = v_enum(*(LANGUAGES + (AUTO,)))
+
 SCHEMA = {
+    "language": (LANGUAGE, "en"),
     "hostname": (v_str, ""),
     "interval": (v_duration(5), 30),
     "state_file": (v_nonempty_str, "/var/lib/qorovul/state.json"),
@@ -337,12 +342,18 @@ def validate(data: Any, env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         cfg["telegram"]["bot_token"] = env[ENV_BOT_TOKEN].strip()
     if env.get(ENV_CHAT_ID):
         cfg["telegram"]["chat_id"] = env[ENV_CHAT_ID].strip()
+    if env.get(ENV_LANG):
+        try:
+            cfg["language"] = LANGUAGE(env[ENV_LANG].strip())
+        except ValueError as exc:
+            errors.append("%s: %s" % (ENV_LANG, exc))
     if not errors:
         _cross_validate(cfg, errors)
     if errors:
         raise ConfigError("invalid configuration:\n  - " + "\n  - ".join(errors))
     if not cfg["hostname"]:
         cfg["hostname"] = socket.gethostname()
+    cfg["language"] = resolve_language(cfg["language"], env)
     for name, section in cfg["checks"].items():
         if section["interval"] is None:
             section["interval"] = CHECK_INTERVAL_DEFAULTS.get(name, cfg["interval"])

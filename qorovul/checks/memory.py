@@ -32,8 +32,8 @@ class MemoryCheck(Check):
         pct = float(vm.percent)
         warn = self.config["threshold"]
         crit = self.config["critical_threshold"]
-        msg = "RAM usage %.1f%% (%.0f MB available of %.0f MB)" % (
-            pct, vm.available / (1024 * 1024), vm.total / (1024 * 1024))
+        msg = self.tr("memory.usage", percent=self.tr.percent(pct),
+                      available=self.tr.size(vm.available), total=self.tr.size(vm.total))
         if crit is not None and pct >= crit:
             return [CheckResult(self.KEY, False, "critical", msg)]
         if pct >= warn:

@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
+from ..i18n import EN, Translator
+
 SEVERITIES = ("info", "warning", "critical")
 
 
@@ -39,6 +41,8 @@ class Check(ABC):
     """
 
     name = "base"
+    # Replaced by build_checks() with the configured language.
+    tr: Translator = EN
 
     def __init__(self, config: Dict[str, Any]) -> None:
         self.config = config
@@ -49,4 +53,4 @@ class Check(ABC):
 
     def cleared_message(self, key: str) -> str:
         """Message used when a failing key is no longer reported."""
-        return "condition no longer present"
+        return self.tr("check.cleared")

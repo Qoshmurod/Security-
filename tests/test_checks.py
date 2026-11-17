@@ -1,6 +1,7 @@
 """Boundary conditions for every check, with faked system inputs."""
 
 import io
+import re
 import os
 import ssl as ssl_mod
 from collections import namedtuple
@@ -144,8 +145,9 @@ def test_memory_thresholds(pct, ok, sev):
     set_mem(ps, pct)
     [r] = check.run()
     assert (r.key, r.ok, r.severity) == ("memory:ram", ok, sev)
-    assert r.message == "RAM usage %.1f%% (%.0f MB available of 8192 MB)" % (
-        pct, 8192 * (100 - pct) / 100)
+    from qorovul.i18n import EN
+    assert r.message == "RAM usage %.1f%% (%s available of 8.0 GB)" % (
+        pct, EN.size(8 * 2 ** 30 * (100 - pct) / 100))
 
 
 def test_memory_no_critical_threshold():
@@ -275,6 +277,11 @@ class FakeLog:
         return io.BytesIO(self.data)
 
 
+def failures(result):
+    """The failure count from an (English) ssh message: "...: <count> (users: ...)"."""
+    return int(re.search(r": (\d+)(?: \(|$)", result.message).group(1))
+
+
 def ssh_check(log=None, clock=lambda: NOW, journal=None, readable=True, **cfg):
     log = log or FakeLog()
     return SSHCheck(section("ssh", **cfg), clock=clock, opener=log.open, stat=log.stat,
@@ -291,7 +298,8 @@ def test_ssh_threshold_boundary(n, alerts):
     assert bool(results) is alerts
     if alerts:
         assert results[0].key == "ssh:203.0.113.9"
-        assert results[0].message.startswith("%d failed SSH logins from 203.0.113.9" % n)
+        assert results[0].message == ("failed SSH logins from 203.0.113.9 in the last 10m: "
+                                      "%d (users: root)" % n)
         assert results[0].severity == "warning"
 
 
@@ -329,7 +337,7 @@ def test_ssh_does_not_double_count_one_connection():
         syslog(NOW, "Connection closed by authenticating user root 203.0.113.9 port 6000 [preauth]"),
     )
     [r] = check.run()
-    assert r.message.startswith("4 failed")
+    assert failures(r) == 4
     assert "admin" in r.message and "root" in r.message
 
 
@@ -341,7 +349,7 @@ def test_ssh_key_only_server_markers_count():
         syslog(NOW, "Connection closed by authenticating user root 203.0.113.9 port 2 [preauth]"),
         syslog(NOW, "Disconnected from authenticating user root 203.0.113.9 port 3 [preauth]"),
     )
-    assert check.run()[0].message.startswith("3 failed")
+    assert failures(check.run()[0]) == 3
 
 
 def test_ssh_ignores_success_and_other_programs():
@@ -374,7 +382,7 @@ def test_ssh_incremental_reads_only_new_lines():
     assert check.run() == []
     assert check.run() == []  # nothing new, still 2
     log.append(syslog(NOW, failed(port=99)))
-    assert check.run()[0].message.startswith("3 failed")
+    assert failures(check.run()[0]) == 3
 
 
 def test_ssh_partial_line_is_completed_next_read():
@@ -392,7 +400,7 @@ def test_ssh_survives_rotation_keeping_window():
     check.run()
     log.rotate()
     log.append(syslog(NOW, failed(port=50)))
-    assert check.run()[0].message.startswith("3 failed")
+    assert failures(check.run()[0]) == 3
 
 
 def test_ssh_survives_truncation():
@@ -410,7 +418,7 @@ def test_ssh_first_read_only_tails_large_logs(monkeypatch):
     check, log = ssh_check(failures=1)
     log.append(*[syslog(NOW, failed(port=i)) for i in range(50)])
     [r] = check.run()
-    count = int(r.message.split()[0])
+    count = failures(r)
     assert 1 <= count < 50  # only the tail was read, and no torn first line
 
 
@@ -425,7 +433,7 @@ def test_ssh_journal_fallback():
     assert r.key == "ssh:203.0.113.9"
     assert calls == [NOW - 600]
     assert len(check.run()) == 1  # rebuilt each run, not accumulated
-    assert check.run()[0].message.startswith("20 failed")
+    assert failures(check.run()[0]) == 20
 
 
 def test_ssh_no_source_raises():
@@ -496,7 +504,7 @@ def test_ssh_failed_none_probe_is_not_a_password_guess():
         syslog(NOW, "Failed none for invalid user guest from 203.0.113.9 port 5001 ssh2"),
     )
     # port 5000: one real guess; port 5001: a failed connection without a guess
-    assert check.run()[0].message.startswith("2 failed")
+    assert failures(check.run()[0]) == 2
 
 
 def test_ssh_rsyslog_repeated_message_counts_each_attempt():
@@ -529,7 +537,8 @@ def test_ssl_expiry_boundaries(days, ok, sev):
 
 def test_ssl_message():
     [r] = ssl_check(lambda h, p, t: cert_expiring(9.5, NOW))
-    assert r.message.startswith("example.com certificate expires in 9 days (")
+    assert re.match(r"example\.com certificate expires on \d{4}-\d\d-\d\d, days left: 9$",
+                    r.message)
 
 
 def test_ssl_expired_certificate():

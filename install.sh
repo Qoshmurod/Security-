@@ -10,6 +10,8 @@
 # Environment knobs:
 #   QOROVUL_REPO   GitHub repo URL   (default https://github.com/Qoshmurod/Security-)
 #   QOROVUL_REF    branch or tag     (default main)
+#   QOROVUL_LANGUAGE  language of the alerts: en uz ru tr ko zh ja es pt fr de ar hi id
+#                     or auto (asked on a fresh install; default: this shell's $LANG)
 #   QOROVUL_SKIP_START=1             install everything but do not start the service
 
 # Everything lives in main() so a truncated `curl | bash` download runs nothing.
@@ -126,9 +128,11 @@ say "installing qorovul into $VENV"
 "$VENV/bin/pip" install --quiet --disable-pip-version-check --upgrade "$SRC"
 ln -sf "$VENV/bin/qorovul" /usr/local/bin/qorovul
 
+FRESH_CONFIG=0
 if [ ! -f "$CONFIG" ]; then
     say "writing $CONFIG"
     install -m 0640 -o root -g "$SVC_USER" "$SRC/config.example.yml" "$CONFIG"
+    FRESH_CONFIG=1
 else
     say "keeping existing $CONFIG"
 fi
@@ -174,6 +178,33 @@ if [ -z "$(cfg_value chat_id)" ] && ! in_env_file QOROVUL_CHAT_ID; then
     [ -n "$chat" ] || chat="$(ask 'Telegram chat id (e.g. 123456789 or -100...): ')"
     if [[ "$chat" =~ $CHAT_RE ]]; then set_cfg chat_id "$chat"
     else warn "no valid chat id given; set telegram.chat_id in $CONFIG"; CREDS_OK=0; fi
+fi
+
+# --- language -----------------------------------------------------------------
+LANGS="en uz ru tr ko zh ja es pt fr de ar hi id"
+supported_lang() { [ "$1" = auto ] || [[ " $LANGS " == *" $1 "* ]]; }
+lang="${QOROVUL_LANGUAGE:-}"
+if [ -z "$lang" ] && [ "$FRESH_CONFIG" = 1 ]; then
+    # Suggest the language of the shell that runs the installer.
+    guess="${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}"
+    guess="${guess%%[_.@]*}"
+    supported_lang "$guess" || guess=en
+    lang="$(ask "Alert language ($LANGS) [$guess]: ")"
+    lang="${lang:-$guess}"
+fi
+if [ -n "$lang" ]; then
+    if supported_lang "$lang"; then
+        if grep -q '^language:' "$CONFIG"; then
+            sed -i -E "s|^language:.*$|language: $lang|" "$CONFIG"
+        else
+            # Configs from before 1.1 have no language line: add one on top.
+            sed -i "1i language: $lang" "$CONFIG"
+        fi
+        grep -qx "language: $lang" "$CONFIG" || die "could not set language in $CONFIG"
+        say "alert language: $lang"
+    else
+        warn "unsupported language '$lang' (supported: $LANGS auto); keeping the current one"
+    fi
 fi
 
 # --- service ------------------------------------------------------------------

@@ -189,15 +189,15 @@ class PortsCheck(Check):
 
     def _describe(self, port: int, listeners: List[Listener]) -> str:
         addrs = ", ".join(sorted({ln.ip for ln in listeners}))
-        msg = "unexpected TCP listener on port %d (%s)" % (port, addrs)
+        parts = [self.tr("ports.unexpected", port=port, addresses=addrs)]
         users = sorted({self.user_name(ln.uid) for ln in listeners if ln.uid is not None})
         procs = sorted({self._owners[ln.inode] for ln in listeners
                         if ln.inode and self._owners.get(ln.inode)})
         if users:
-            msg += ", user %s" % ", ".join(users)
+            parts.append(self.tr("ports.user", users=", ".join(users)))
         if procs:
-            msg += ", process %s" % ", ".join(procs)
-        return msg
+            parts.append(self.tr("ports.process", processes=", ".join(procs)))
+        return self.tr.join(parts)
 
     def run(self) -> List[CheckResult]:
         by_port = {}  # type: Dict[int, List[Listener]]
@@ -210,4 +210,4 @@ class PortsCheck(Check):
                 for port in sorted(by_port)]
 
     def cleared_message(self, key: str) -> str:
-        return "TCP port %s is no longer listening" % key.rsplit("/", 1)[1]
+        return self.tr("ports.cleared", port=key.rsplit("/", 1)[1])

@@ -8,6 +8,14 @@
 #
 # Durations accept plain seconds (30) or a suffix: 30s, 10m, 6h, 1d.
 
+# Language of Telegram messages and of `qorovul test` / `qorovul status`:
+#   en English     uz Oʻzbekcha   ru Русский     tr Türkçe     ko 한국어
+#   zh 简体中文     ja 日本語      es Español     pt Português  fr Français
+#   de Deutsch     ar العربية     hi हिन्दी       id Bahasa Indonesia
+# or "auto" to follow the server's locale ($LANG). Env override: QOROVUL_LANG.
+# Journal logs and config errors are always in English.
+language: en
+
 # Name shown at the top of every Telegram message. Empty = system hostname.
 hostname: ""
 

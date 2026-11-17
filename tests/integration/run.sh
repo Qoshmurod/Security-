@@ -109,7 +109,7 @@ python3 "$HELPER" serve "$API" "$TG" & PIDS+=($!)
     # 1) self-signed certificate -> must be reported as "not valid"
     openssl req -x509 -newkey rsa:2048 -nodes -keyout self.key -out self.crt -days 365 \
         -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost" 2>/dev/null
-    # 2) properly signed by a trusted CA but expiring in 10 days -> "expires in"
+    # 2) properly signed by a trusted CA but expiring in 10 days -> "days left"
     openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 3650 \
         -subj "/CN=Qorovul CI Root" 2>/dev/null
     openssl req -newkey rsa:2048 -nodes -keyout leaf.key -out leaf.csr -subj "/CN=localhost" 2>/dev/null
@@ -142,6 +142,7 @@ sleep 1
 
 mkdir -p /etc/qorovul
 cat > /etc/qorovul/config.yml <<EOF
+language: en
 hostname: qci
 interval: 5s
 telegram:
@@ -200,7 +201,7 @@ errors="$(keys_matching 'k.endswith(":error")')"
 [ -z "$errors" ] || fail "checks that could not run: $errors"
 ok "no check errors"
 expect_state "ssl:localhost:$TLS_BAD" failing critical 'not valid'
-expect_state "ssl:localhost:$TLS_SOON" failing warning 'expires in (9|10) days'
+expect_state "ssl:localhost:$TLS_SOON" failing warning 'expires on [0-9-]+, days left: (9|10)$'
 expect_state memory:ram failing warning 'RAM usage'
 expect_state "disk:$MNT" ok
 expect_state service:qci-dummy.service ok
@@ -231,7 +232,8 @@ expect_event alert ssh:127.0.0.1 60
 expect_state service:qci-dummy.service failing critical 'qci-dummy.service is (inactive|failed)'
 expect_state "ports:tcp/$ROGUE" failing warning "port $ROGUE \\(0\\.0\\.0\\.0\\), user nobody"
 expect_state "disk:$MNT" failing warning '8[5-9]\.[0-9]% full'
-expect_state ssh:127.0.0.1 failing warning '^4 failed SSH logins from 127\.0\.0\.1 .*qci-nouser'
+expect_state ssh:127.0.0.1 failing warning \
+    '^failed SSH logins from 127\.0\.0\.1 in the last 10m: 4 \(users: qci-nouser\)$'
 
 # ---------------------------------------------------------------------------
 step "discipline: each alert is sent once"
@@ -355,6 +357,31 @@ for key in ssh:127.0.0.1 memory:ram "ssl:localhost:$TLS_BAD"; do
     expect_count alert "$key" 1
     expect_count recovered "$key" 0
 done
+
+# ---------------------------------------------------------------------------
+step "languages: the CLI and Telegram messages follow the chosen language"
+
+runuser -u qorovul -- "$QOROVUL" test --lang ru >"$WORK/test-ru.txt" 2>&1 || true
+grep -q "проверок выполнено:" "$WORK/test-ru.txt" || fail "qorovul test --lang ru printed no Russian"
+grep -q "Тестовое сообщение Qorovul" "$TG" || fail "no Russian test message reached Telegram"
+ok "qorovul test --lang ru: Russian output and Telegram message"
+status_ko="$("$QOROVUL" status --lang ko)"
+printf '%s\n' "$status_ko" | grep -q "마지막 알림" || fail "qorovul status --lang ko is not Korean"
+ok "qorovul status --lang ko: Korean table"
+sed -i -E 's|^language:.*$|language: uz|' /etc/qorovul/config.yml
+systemctl restart qorovul
+dd if=/dev/zero of="$MNT/fill" bs=1M count=7 status=none
+uz_alert=0
+for _ in $(seq 1 60); do
+    if grep -q "toʻlgan (boʻsh:" "$TG"; then uz_alert=1; break; fi
+    sleep 1
+done
+[ "$uz_alert" = 1 ] || fail "no Uzbek alert after switching the language"
+ok "daemon with language: uz sends Uzbek alerts"
+rm -f "$MNT/fill"
+sed -i -E 's|^language:.*$|language: en|' /etc/qorovul/config.yml
+systemctl restart qorovul
+sleep 3
 
 # ---------------------------------------------------------------------------
 step "idempotency: running install.sh again changes nothing"

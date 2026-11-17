@@ -308,15 +308,16 @@ class SSHCheck(Check):
         self.window.prune(cutoff)
 
         limit = self.config["failures"]
-        minutes = int(self.config["window"] // 60)
-        span = "%dm" % minutes if minutes else "%ds" % self.config["window"]
+        span = self.tr.duration(self.config["window"])
         results = []
         for ip, (count, users) in sorted(self.window.counts().items()):
             if count < limit or self._ignored(ip):
                 continue
-            msg = "%d failed SSH logins from %s in the last %s" % (count, ip, span)
             if users:
-                msg += " (users: %s)" % ", ".join(sorted(users))
+                msg = self.tr("ssh.failures_users", ip=ip, window=span, count=count,
+                              users=", ".join(sorted(users)))
+            else:
+                msg = self.tr("ssh.failures", ip=ip, window=span, count=count)
             results.append(CheckResult("ssh:" + ip, False, self.config["severity"], msg))
         return results
 
@@ -325,6 +326,5 @@ class SSHCheck(Check):
         return any(addr in net for net in self.ignore)
 
     def cleared_message(self, key: str) -> str:
-        return "failed logins from %s dropped below %d per %s" % (
-            key.split(":", 1)[1], self.config["failures"],
-            "%dm" % (self.config["window"] // 60))
+        return self.tr("ssh.cleared", ip=key.split(":", 1)[1], limit=self.config["failures"],
+                       window=self.tr.duration(self.config["window"]))

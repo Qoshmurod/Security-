@@ -222,7 +222,7 @@ def test_cli_status(tmp_path, capsys):
     cfg.write_text("state_file: %s\n" % (tmp_path / "state.json"))
     assert main(["status", "-c", str(cfg)]) == 0
     out = capsys.readouterr().out
-    assert "1 failing" in out and "disk:/" in out and "FAILING" in out and "alert" in out
+    assert "failing: 1" in out and "disk:/" in out and "FAILING" in out and "alert" in out
     assert main(["status", "--json", "-c", str(cfg)]) == 0
     assert json.loads(capsys.readouterr().out)["disk:/"]["status"] == "failing"
 

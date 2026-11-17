@@ -50,7 +50,9 @@ class ServiceCheck(Check):
             state = state.strip() or "unknown"
             key = "service:" + unit
             if state in OK_STATES:
-                results.append(CheckResult(key, True, "info", "%s is %s" % (unit, state)))
+                results.append(CheckResult(key, True, "info",
+                                           self.tr("service.state", unit=unit, state=state)))
             else:
-                results.append(CheckResult(key, False, severity, "%s is %s" % (unit, state)))
+                results.append(CheckResult(key, False, severity,
+                                           self.tr("service.state", unit=unit, state=state)))
         return results

@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 from typing import Any, Callable, List, Optional, Sequence
 
+from .i18n import EN, Translator
 from .state import ALERT, ESCALATED, RECOVERED, REMINDER, Event
 
 log = logging.getLogger(__name__)
@@ -25,20 +26,8 @@ ICON_REMINDER = "\U0001F501"
 ICON_HOST = "\U0001F6E1"
 
 
-def human_duration(seconds: Optional[float]) -> str:
-    if seconds is None:
-        return "?"
-    seconds = int(max(0, seconds))
-    days, rem = divmod(seconds, 86400)
-    hours, rem = divmod(rem, 3600)
-    minutes, secs = divmod(rem, 60)
-    if days:
-        return "%dd %dh" % (days, hours)
-    if hours:
-        return "%dh %dm" % (hours, minutes)
-    if minutes:
-        return "%dm" % minutes
-    return "%ds" % secs
+def human_duration(seconds: Optional[float], tr: Translator = EN) -> str:
+    return tr.duration(seconds)
 
 
 def _clock(ts: Optional[float]) -> str:
@@ -61,24 +50,30 @@ def to_plain(text: str) -> str:
     return html.unescape(_TAG_RE.sub("", text))
 
 
-def format_event(ev: Event) -> str:
-    """Render one event as a Telegram HTML block."""
+def format_event(ev: Event, tr: Translator = EN) -> str:
+    """Render one event as a Telegram HTML block in the given language."""
+    def e(text: str) -> str:  # translations are trusted, but never let them break markup
+        return html.escape(text, quote=False)
+
     key = _esc(ev.key, MAX_KEY_TEXT)
     msg = _esc(ev.message, MAX_EVENT_TEXT)
-    sev = ev.severity.upper()
+    sev = tr.severity(ev.severity)
     if ev.kind == RECOVERED:
-        head = "%s <b>RECOVERED</b> <code>%s</code>" % (ICON_RECOVERED, key)
-        foot = "was %s for %s" % (sev, human_duration(ev.duration))
+        head = "%s <b>%s</b> <code>%s</code>" % (ICON_RECOVERED, e(tr("event.recovered")), key)
+        foot = tr("footer.was", severity=sev, duration=tr.duration(ev.duration))
     elif ev.kind == REMINDER:
-        head = "%s <b>STILL %s</b> <code>%s</code>" % (ICON_REMINDER, sev, key)
-        foot = "failing for %s (since %s)" % (human_duration(ev.duration), _clock(ev.since))
+        head = "%s <b>%s</b> <code>%s</code>" % (
+            ICON_REMINDER, e(tr("event.still", severity=sev)), key)
+        foot = tr("footer.failing_for", duration=tr.duration(ev.duration),
+                  time=_clock(ev.since))
     elif ev.kind == ESCALATED:
-        head = "%s <b>%s</b> <code>%s</code> ↑ escalated" % (ICONS[ev.severity], sev, key)
-        foot = "since %s" % _clock(ev.since)
+        head = "%s <b>%s</b> <code>%s</code> \u2191 %s" % (
+            ICONS[ev.severity], e(sev), key, e(tr("event.escalated")))
+        foot = tr("footer.since", time=_clock(ev.since))
     else:
-        head = "%s <b>%s</b> <code>%s</code>" % (ICONS[ev.severity], sev, key)
-        foot = "since %s" % _clock(ev.since)
-    return "%s\n%s\n<i>%s</i>" % (head, msg, foot)
+        head = "%s <b>%s</b> <code>%s</code>" % (ICONS[ev.severity], e(sev), key)
+        foot = tr("footer.since", time=_clock(ev.since))
+    return "%s\n%s\n<i>%s</i>" % (head, msg, e(foot))
 
 
 def format_header(hostname: str) -> str:
@@ -86,7 +81,7 @@ def format_header(hostname: str) -> str:
 
 
 def chunk_events(events: Sequence[Event], hostname: str,
-                 limit: Optional[int] = None) -> List[List[Event]]:
+                 limit: Optional[int] = None, tr: Translator = EN) -> List[List[Event]]:
     """Group events into messages that each fit Telegram's size limit."""
     limit = limit or MAX_MESSAGE
     header_len = len(format_header(hostname)) + 2
@@ -94,7 +89,7 @@ def chunk_events(events: Sequence[Event], hostname: str,
     current = []  # type: List[Event]
     size = header_len
     for ev in events:
-        block = len(format_event(ev)) + 2
+        block = len(format_event(ev, tr)) + 2
         if current and size + block > limit:
             chunks.append(current)
             current, size = [], header_len
@@ -105,8 +100,8 @@ def chunk_events(events: Sequence[Event], hostname: str,
     return chunks
 
 
-def render(events: Sequence[Event], hostname: str) -> str:
-    return "\n\n".join([format_header(hostname)] + [format_event(e) for e in events])
+def render(events: Sequence[Event], hostname: str, tr: Translator = EN) -> str:
+    return "\n\n".join([format_header(hostname)] + [format_event(e, tr) for e in events])
 
 
 class TelegramNotifier:
@@ -114,8 +109,10 @@ class TelegramNotifier:
 
     def __init__(self, token: str, chat_id: str, timeout: float = 10,
                  api_url: str = "https://api.telegram.org", attempts: int = 3,
-                 session: Any = None, sleep: Callable[[float], None] = time.sleep) -> None:
+                 session: Any = None, sleep: Callable[[float], None] = time.sleep,
+                 tr: Translator = EN) -> None:
         self.token = token
+        self.tr = tr
         self.chat_id = chat_id
         self.timeout = timeout
         self.url = "%s/bot%s/sendMessage" % (api_url.rstrip("/"), token)
@@ -196,8 +193,8 @@ class TelegramNotifier:
         commits those (undelivered ones stay due and are retried next cycle).
         """
         delivered = []  # type: List[Event]
-        for chunk in chunk_events(events, hostname):
-            if self.send_text(render(chunk, hostname)):
+        for chunk in chunk_events(events, hostname, tr=self.tr):
+            if self.send_text(render(chunk, hostname, self.tr)):
                 delivered.extend(chunk)
             else:
                 break  # keep ordering; try the rest next cycle

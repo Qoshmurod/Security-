@@ -33,7 +33,7 @@ qorovul = "qorovul.__main__:main"
 Homepage = "https://github.com/Qoshmurod/Security-"
 
 [tool.setuptools]
-packages = ["qorovul", "qorovul.checks"]
+packages = ["qorovul", "qorovul.checks", "qorovul.locales"]
 
 [tool.setuptools.dynamic]
 version = { attr = "qorovul.__version__" }

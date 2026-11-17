@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, List
 
+from ..i18n import get_translator
 from .base import SEVERITIES, Check, CheckResult, severity_rank
 from .disk import DiskCheck
 from .memory import MemoryCheck
@@ -22,8 +23,14 @@ REGISTRY = {
 
 def build_checks(config: Dict[str, Any]) -> List[Check]:
     """Instantiate every enabled check from a validated config."""
-    return [REGISTRY[name](section) for name, section in config["checks"].items()
-            if section["enabled"]]
+    tr = get_translator(config.get("language", "en"))
+    checks = []
+    for name, section in config["checks"].items():
+        if section["enabled"]:
+            check = REGISTRY[name](section)
+            check.tr = tr
+            checks.append(check)
+    return checks
 
 
 __all__ = ["Check", "CheckResult", "SEVERITIES", "severity_rank", "REGISTRY", "build_checks"]

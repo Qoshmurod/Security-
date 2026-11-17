@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/Qoshmurod/Security-/actions/workflows/ci.yml/badge.svg)](https://github.com/Qoshmurod/Security-/actions/workflows/ci.yml)
 
+**English** · [Oʻzbekcha](README.uz.md) · [Русский](README.ru.md) · [Türkçe](README.tr.md) · [한국어](README.ko.md)
+
 **Qorovul** (Uzbek for *sentry*) is a small Linux server watchdog. It runs as a
 systemd service on the machine it watches and sends alerts to Telegram.
 
@@ -22,6 +24,7 @@ It watches six things:
 Alerts are **sent once**. You get a reminder only if the problem is still there
 after a cooldown (6 h by default), and a **RECOVERED** message when it clears.
 An optional heartbeat URL tells you when the whole server goes silent.
+Alerts speak 14 languages (see [Languages](#languages)).
 
 ![Example Telegram alerts](docs/alert-example.png)
 
@@ -119,6 +122,49 @@ prove this.
 
 ---
 
+## Languages
+
+Telegram messages, check results and the output of `qorovul test` and
+`qorovul status` are available in:
+
+| Code | Language | Code | Language | Code | Language |
+|------|----------|------|----------|------|----------|
+| `en` | English | `zh` | 简体中文 | `de` | Deutsch |
+| `uz` | Oʻzbekcha | `ja` | 日本語 | `ar` | العربية |
+| `ru` | Русский | `es` | Español | `hi` | हिन्दी |
+| `tr` | Türkçe | `pt` | Português | `id` | Bahasa Indonesia |
+| `ko` | 한국어 | `fr` | Français | | |
+
+Set it once in the config, or let it follow the server's locale:
+
+```yaml
+language: uz        # or auto: taken from $LANG (ru_RU.UTF-8 -> ru)
+```
+
+The installer asks on a fresh install and suggests the language of your shell
+(`QOROVUL_LANGUAGE=ko` skips the question). For a single command use `--lang`:
+`qorovul status --lang ru`. `QOROVUL_LANG` overrides the config for the
+service, e.g. in `/etc/qorovul/qorovul.env`.
+
+Numbers follow each language's conventions: `87,3%` in Uzbek and Russian,
+`%87,3` in Turkish, `13,7 ГБ` in Russian, `13,7 Go` in French, `2 soat 5 daq`,
+`2시간 5분`, `2小时5分`. Messages are worded so that no plural forms are needed
+("days left: 3"), which keeps them grammatical in every language, and
+`qorovul status` lines up Korean, Chinese and Japanese text correctly in the
+terminal.
+
+What stays in English on purpose: the journal log and configuration errors
+(they are searched for and pasted into bug reports), config keys, alert keys
+such as `disk:/var`, and texts that come from the system itself, such as
+systemd unit states (`failed`) or OpenSSL errors.
+
+Adding a language means adding one file to `qorovul/locales/`. The tests check
+that every catalog has every message with the same placeholders as English.
+
+![Alerts in Uzbek](docs/alert-example.uz.png)
+
+---
+
 ## Configuration reference
 
 The config lives at `/etc/qorovul/config.yml` (`-c PATH` or `$QOROVUL_CONFIG`
@@ -138,6 +184,7 @@ Durations accept seconds (`30`) or `30s`, `10m`, `6h`, `1d`.
 
 | Key          | Default                        | Meaning |
 |--------------|--------------------------------|---------|
+| `language`   | `en`                           | Language of messages (see [Languages](#languages)); env `QOROVUL_LANG` |
 | `hostname`   | system hostname                | Name in the message header |
 | `interval`   | `30s`                          | How often checks run (min 5 s) |
 | `state_file` | `/var/lib/qorovul/state.json`  | Alert state, must be writable |
@@ -303,14 +350,14 @@ qorovul status [--json]  current state and the last alert per key
 qorovul version
 ```
 
-All commands accept `-c PATH`. Exit codes for `test`: `0` all good, `1` some
+All commands accept `-c PATH` and `--lang LANG`. Exit codes for `test`: `0` all good, `1` some
 checks are failing (the message was still sent), `2` invalid config,
 `3` Telegram delivery failed. `run` exits `2` on invalid config, and systemd
 does not restart it in a loop for that.
 
 ```
 $ sudo qorovul status
-state: /var/lib/qorovul/state.json  (9 keys, 1 failing)
+state: /var/lib/qorovul/state.json (keys: 9, failing: 1)
 
 KEY                            STATUS   SEVERITY  SINCE            LAST ALERT                 MESSAGE
 ports:tcp/8080                 FAILING  warning   2026-11-16 14:10 alert 2026-11-16 14:10     unexpected TCP listener on port 8080 (0.0.0.0), user deploy
@@ -380,14 +427,15 @@ Delete the file and restart to go back.
    virtualenv at `/opt/qorovul/venv` (no system Python packages are touched,
    PEP 668 safe) and links `/usr/local/bin/qorovul`;
 5. writes `/etc/qorovul/config.yml` from the example **only if it does not exist**;
-6. asks for the bot token and chat id (on the terminal, so it works under
+6. on a fresh install asks for the alert language (suggesting your shell's),
+   then for the bot token and chat id (on the terminal, so it works under
    `curl | bash`) if they are not set yet, or takes `QOROVUL_BOT_TOKEN` /
    `QOROVUL_CHAT_ID` from the environment;
 7. installs and enables `qorovul.service`, runs `qorovul test` as the
    `qorovul` user, then (re)starts the service.
 
-Options: `QOROVUL_REF=v1.0.0` (branch or tag to install), `QOROVUL_REPO=...`,
-`QOROVUL_SKIP_START=1`. From a checkout: `sudo ./install.sh`.
+Options: `QOROVUL_LANGUAGE=uz` (alert language), `QOROVUL_REF=v1.1.0` (branch or
+tag to install), `QOROVUL_REPO=...`, `QOROVUL_SKIP_START=1`. From a checkout: `sudo ./install.sh`.
 
 Manual install with pip works too: `pip install .` gives you the `qorovul`
 command. Copy `config.example.yml` and `qorovul.service` into place yourself.

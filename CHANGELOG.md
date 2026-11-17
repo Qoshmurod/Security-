@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.1.0 — 2026-11-17
+
+### Added
+- Messages in 14 languages: English, Uzbek, Russian, Turkish, Korean,
+  Chinese (Simplified), Japanese, Spanish, Portuguese, French, German, Arabic,
+  Hindi and Indonesian. This covers Telegram alerts, check results, and the
+  output of `qorovul test` and `qorovul status`.
+- `language` config option (or `auto` to follow `$LANG`), the `QOROVUL_LANG`
+  environment override, and the `--lang` command-line option.
+- The installer asks for the alert language on a fresh install and suggests
+  the shell's. `QOROVUL_LANGUAGE` skips the question.
+- Numbers, sizes and durations follow each language's conventions: decimal
+  comma, `%87,3` in Turkish, `ГБ` in Russian, `Go` in French, `2시간 5분`.
+- `qorovul status` lines up columns by display width, so Korean, Chinese and
+  Japanese tables align.
+- README in Uzbek, Russian, Turkish and Korean, with example screenshots.
+
+### Changed
+- English messages with a count no longer need plural forms:
+  `failed SSH logins from 203.0.113.9 in the last 10m: 48` and
+  `example.com certificate expires on 2026-11-26, days left: 9`.
+- The memory message shows sizes with units (`15.0 GB`) instead of a fixed MB.
+- `qorovul status --json` keeps non-ASCII text readable.
+
+### Fixed
+- The installer can set the language on configs written by 1.0, which have no
+  `language` line.
+
 ## 1.0.0 — 2026-11-17
 
 Verified end to end on real systemd. `tests/integration/run.sh` and CI now

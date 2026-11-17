@@ -79,7 +79,7 @@ def test_check_end_to_end_on_almalinux_sample():
                      readable=lambda p: True)
     [r] = check.run()
     assert r.key == "ssh:203.0.113.77"
-    assert r.message == ("3 failed SSH logins from 203.0.113.77 in the last 10m "
+    assert r.message == ("failed SSH logins from 203.0.113.77 in the last 10m: 3 "
                          "(users: root, test)")
 
 

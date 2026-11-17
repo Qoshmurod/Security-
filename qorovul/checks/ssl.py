@@ -71,22 +71,20 @@ class SSLCheck(Check):
                 break
             except CertVerifyError as exc:
                 return CheckResult(key, False, "critical",
-                                   "%s certificate is not valid: %s" % (host, exc))
+                                   self.tr("ssl.invalid", host=host, reason=exc))
             except (OSError, ssl.SSLError) as exc:
                 if attempt < self.CONNECT_ATTEMPTS:
                     self.sleep(self.RETRY_DELAY)
                     continue
                 return CheckResult(key, False, self.config["connect_error_severity"],
-                                   "cannot check certificate of %s:%d: %s" % (host, port, exc))
+                                   self.tr("ssl.unreachable", host=host, port=port, error=exc))
         expires = ssl.cert_time_to_seconds(cert["notAfter"])
         days = (expires - self.clock()) / 86400.0
         date = datetime.fromtimestamp(expires, timezone.utc).strftime("%Y-%m-%d")
-        whole = int(days) if days >= 0 else -int(-days)  # truncate toward zero
         if days < 0:
             return CheckResult(key, False, "critical",
-                               "%s certificate EXPIRED on %s" % (host, date))
-        msg = "%s certificate expires in %d day%s (%s)" % (
-            host, whole, "" if whole == 1 else "s", date)
+                               self.tr("ssl.expired", host=host, date=date))
+        msg = self.tr("ssl.expires", host=host, date=date, days=int(days))
         if days <= self.config["critical_days"]:
             return CheckResult(key, False, "critical", msg)
         if days <= self.config["warn_days"]:
