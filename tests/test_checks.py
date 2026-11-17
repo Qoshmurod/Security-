@@ -608,6 +608,15 @@ def test_ssl_custom_port_and_thresholds():
     assert r.key == "ssl:mail.example.com:993" and not r.ok
 
 
+def test_ssl_context_verifies_but_not_python_strict_mode():
+    import ssl as ssl_mod
+    from qorovul.checks.ssl import make_context
+    ctx = make_context()
+    assert ctx.verify_mode == ssl_mod.CERT_REQUIRED
+    assert ctx.check_hostname is True
+    assert not ctx.verify_flags & ssl_mod.VERIFY_X509_STRICT
+
+
 def test_ssl_parse_target():
     assert parse_target("a.com") == ("a.com", 443)
     assert parse_target("a.com:8443") == ("a.com", 8443)

@@ -13,9 +13,22 @@ class CertVerifyError(Exception):
     """The server presented a certificate that does not verify."""
 
 
+def make_context() -> ssl.SSLContext:
+    """TLS context that verifies the chain, the host name and the dates.
+
+    Python 3.13+ also turns on VERIFY_X509_STRICT, which rejects some private
+    CAs that curl and browsers accept (for example a CA certificate without a
+    keyUsage extension).  Clearing it keeps the verdict the same on every
+    distribution instead of depending on which Python it ships.
+    """
+    ctx = ssl.create_default_context()
+    ctx.verify_flags &= ~getattr(ssl, "VERIFY_X509_STRICT", 0)
+    return ctx
+
+
 def fetch_cert(host: str, port: int, timeout: float) -> Dict[str, Any]:
     """Connect with full verification and return ``getpeercert()``."""
-    ctx = ssl.create_default_context()
+    ctx = make_context()
     try:
         with socket.create_connection((host, port), timeout=timeout) as sock:
             with ctx.wrap_socket(sock, server_hostname=host) as tls:

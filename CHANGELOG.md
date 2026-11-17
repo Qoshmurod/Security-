@@ -6,6 +6,10 @@
   coreutils, sudo-rs). CI now runs the full integration test on it and the
   unit tests on Python 3.14.
 - The installer looks for `python3.14` first.
+- SSL: on Python 3.13+ (Ubuntu 26.04) some private CAs that curl and browsers
+  accept, for example a CA without a keyUsage extension, were reported as
+  "not valid" (critical). Verification now follows the same rules on every
+  distribution. Chain, host name and expiry are still checked.
 
 ## 1.1.0 — 2026-11-17
 

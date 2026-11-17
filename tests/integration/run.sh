@@ -110,10 +110,16 @@ python3 "$HELPER" serve "$API" "$TG" & PIDS+=($!)
     openssl req -x509 -newkey rsa:2048 -nodes -keyout self.key -out self.crt -days 365 \
         -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost" 2>/dev/null
     # 2) properly signed by a trusted CA but expiring in 10 days -> "days left"
+    #    Extensions as a public CA would set them, so the chain is valid even
+    #    under the strictest verification.
     openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 3650 \
-        -subj "/CN=Qorovul CI Root" 2>/dev/null
+        -subj "/CN=Qorovul CI Root" \
+        -addext "basicConstraints=critical,CA:TRUE" \
+        -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
     openssl req -newkey rsa:2048 -nodes -keyout leaf.key -out leaf.csr -subj "/CN=localhost" 2>/dev/null
-    printf 'subjectAltName=DNS:localhost\nbasicConstraints=CA:FALSE\n' > leaf.ext
+    printf '%s\n' "subjectAltName=DNS:localhost" "basicConstraints=critical,CA:FALSE" \
+        "keyUsage=critical,digitalSignature,keyEncipherment" "extendedKeyUsage=serverAuth" \
+        "subjectKeyIdentifier=hash" "authorityKeyIdentifier=keyid,issuer" > leaf.ext
     openssl x509 -req -in leaf.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out leaf.crt \
         -days 10 -extfile leaf.ext 2>/dev/null
 )
