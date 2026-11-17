@@ -44,7 +44,9 @@ fail() { printf '  \033[1;31mFAIL\033[0m  %s\n' "$*" >&2; diagnostics; exit 1; }
 
 cleanup() {
     local p
-    for p in "${PIDS[@]:-}"; do [ -n "$p" ] && kill "$p" 2>/dev/null || true; done
+    for p in "${PIDS[@]:-}"; do
+        if [ -n "$p" ]; then kill "$p" 2>/dev/null || true; fi
+    done
     pkill -f "http.server $ROGUE" 2>/dev/null || true
     pkill -f "http.server $ROGUE2" 2>/dev/null || true
     systemctl stop qci-dummy.service 2>/dev/null || true

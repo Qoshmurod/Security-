@@ -13,8 +13,8 @@ jobs:
   lint:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: pyflakes
@@ -32,8 +32,8 @@ jobs:
       matrix:
         python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
       - run: pip install '.[test]'
@@ -49,7 +49,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: prerequisites
         run: |
           sudo apt-get update -q
@@ -78,7 +78,7 @@ jobs:
               dnf install -y -q systemd openssh-server openssh-clients python3 openssl
               ca-certificates procps-ng util-linux shadow-utils iproute findutils
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: build a systemd image
         run: |
           printf 'FROM %s\nRUN %s\nCMD ["%s"]\n' \
