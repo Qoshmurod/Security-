@@ -11,7 +11,7 @@ import pytest
 from qorovul.checks import REGISTRY, build_checks
 from qorovul.checks.disk import DiskCheck
 from qorovul.checks.memory import MemoryCheck
-from qorovul.checks.ports import PortsCheck, decode_addr, parse_proc_net
+from qorovul.checks.ports import Listener, PortsCheck, decode_addr, parse_proc_net
 from qorovul.checks.service import ServiceCheck
 from qorovul.checks.ssh import SSHCheck, parse_line, parse_timestamp
 from qorovul.checks.ssl import CertVerifyError, SSLCheck, parse_target
@@ -95,11 +95,20 @@ def test_disk_dedupes_bind_mounts_keeping_shortest():
 
 
 def test_disk_explicit_mountpoints_only():
-    parts = [Part("/dev/sda1", "/", "ext4", ""), Part("/dev/sda2", "/var", "ext4", ""),
-             Part("tmpfs", "/dev/shm", "tmpfs", "")]
-    u = {p.mountpoint: usage(50) for p in parts}
-    keys = [r.key for r in disk(parts, u, mountpoints=["/var", "/dev/shm"])]
-    assert keys == ["disk:/var", "disk:/dev/shm"]
+    parts = [Part("/dev/sda1", "/", "ext4", ""), Part("/dev/sda2", "/var", "ext4", "")]
+    u = {"/": usage(50), "/var": usage(50), "/dev/shm": usage(90), "/mnt/nfs": usage(10)}
+    # tmpfs and network mounts are not in psutil's partition list at all, but
+    # must still be checked when the user names them.
+    results = disk(parts, u, mountpoints=["/var", "/dev/shm", "/mnt/nfs"])
+    assert [(r.key, r.ok) for r in results] == [
+        ("disk:/var", True), ("disk:/dev/shm", False), ("disk:/mnt/nfs", True)]
+
+
+def test_disk_explicit_mountpoint_that_cannot_be_read_is_reported():
+    err = FileNotFoundError(2, "No such file or directory")
+    [r] = disk([], {"/mnt/backup": err}, mountpoints=["/mnt/backup"])
+    assert (r.key, r.ok, r.severity) == ("disk:/mnt/backup", False, "warning")
+    assert r.message == "cannot read disk usage of /mnt/backup: No such file or directory"
 
 
 def test_disk_skips_mount_that_vanished():
@@ -127,41 +136,29 @@ def set_mem(ps, pct):
     ps.vm = VM(total, total * (100 - pct) / 100, pct)
 
 
-def test_memory_requires_sustained_cycles():
-    check, ps = mem_check()
-    set_mem(ps, 95)
-    assert check.run()[0].ok
-    assert check.run()[0].ok
-    r = check.run()[0]
-    assert (r.key, r.ok, r.severity) == ("memory:ram", False, "warning")
-    assert "3 consecutive" in r.message
-
-
-def test_memory_dip_resets_counter():
-    check, ps = mem_check()
-    for pct in (95, 95, 89.9, 95, 95):
-        set_mem(ps, pct)
-        assert check.run()[0].ok
-    set_mem(ps, 95)
-    assert not check.run()[0].ok
-
-
 @pytest.mark.parametrize("pct,ok,sev", [
-    (89.9, True, "info"), (90.0, False, "warning"), (96.9, False, "warning"),
-    (97.0, False, "critical")])
+    (0, True, "info"), (89.9, True, "info"), (90.0, False, "warning"), (96.9, False, "warning"),
+    (97.0, False, "critical"), (100, False, "critical")])
 def test_memory_thresholds(pct, ok, sev):
-    check, ps = mem_check(sustained_cycles=1)
+    check, ps = mem_check()
     set_mem(ps, pct)
-    r = check.run()[0]
-    assert (r.ok, r.severity) == (ok, sev)
+    [r] = check.run()
+    assert (r.key, r.ok, r.severity) == ("memory:ram", ok, sev)
+    assert r.message == "RAM usage %.1f%% (%.0f MB available of 8192 MB)" % (
+        pct, 8192 * (100 - pct) / 100)
 
 
-def test_memory_stays_failing_while_high_and_clears_on_drop():
-    check, ps = mem_check(sustained_cycles=2)
-    set_mem(ps, 92)
-    check.run()
-    assert not check.run()[0].ok
-    assert not check.run()[0].ok
+def test_memory_no_critical_threshold():
+    check, ps = mem_check(critical_threshold=None)
+    set_mem(ps, 99.9)
+    assert check.run()[0].severity == "warning"
+
+
+def test_memory_check_is_stateless():
+    # The sustain requirement lives in the persisted alert state, not here.
+    check, ps = mem_check()
+    set_mem(ps, 95)
+    assert [check.run()[0].ok for _ in range(3)] == [False, False, False]
     set_mem(ps, 50)
     assert check.run()[0].ok
 
@@ -468,12 +465,44 @@ def test_parse_timestamp_year_rollover():
 def test_parse_line_rejects_bad_ip():
     assert parse_line("sshd[1]: Failed password for root from 999.1.1.1 port 22 ssh2") is None
     assert parse_line("sshd[1]: Failed password for root from 1.2.3.4 port 22 ssh2") == \
-        ("1.2.3.4", 22, "root", True)
+        ("1.2.3.4", 22, "root", 1)
 
 
 def test_ssh_user_with_spaces_from_attacker_input():
     line = "sshd[1]: Failed password for invalid user a b from 1.2.3.4 port 7 ssh2"
-    assert parse_line(line) == ("1.2.3.4", 7, "a b", True)
+    assert parse_line(line) == ("1.2.3.4", 7, "a b", 1)
+
+
+@pytest.mark.parametrize("line,real_ip", [
+    ("sshd[1]: Failed password for invalid user root from 10.0.0.1 port 22 from 203.0.113.9 "
+     "port 51022 ssh2", "203.0.113.9"),
+    ("sshd[1]: Invalid user x from 10.0.0.1 port 22 from 203.0.113.9 port 51022", "203.0.113.9"),
+    ("sshd[1]: Connection closed by invalid user a 10.0.0.1 port 22 203.0.113.9 port 51022 "
+     "[preauth]", "203.0.113.9"),
+    ("sshd[1]: Failed publickey for git from 203.0.113.9 port 51022 ssh2: ED25519 SHA256:abc",
+     "203.0.113.9"),
+])
+def test_ssh_user_name_cannot_spoof_source_ip(line, real_ip):
+    ip, port, _user, _failed = parse_line(line)
+    assert (ip, port) == (real_ip, 51022)
+
+
+def test_ssh_failed_none_probe_is_not_a_password_guess():
+    check, log = ssh_check(failures=1)
+    log.append(
+        syslog(NOW, "Invalid user admin from 203.0.113.9 port 5000"),
+        syslog(NOW, "Failed none for invalid user admin from 203.0.113.9 port 5000 ssh2"),
+        syslog(NOW, "Failed password for invalid user admin from 203.0.113.9 port 5000 ssh2"),
+        syslog(NOW, "Failed none for invalid user guest from 203.0.113.9 port 5001 ssh2"),
+    )
+    # port 5000: one real guess; port 5001: a failed connection without a guess
+    assert check.run()[0].message.startswith("2 failed")
+
+
+def test_ssh_rsyslog_repeated_message_counts_each_attempt():
+    line = ("Nov 16 11:51:24 web-01 sshd[2305]: message repeated 2 times: "
+            "[ Failed password for root from 203.0.113.9 port 51040 ssh2]")
+    assert parse_line(line) == ("203.0.113.9", 51040, "root", 2)
 
 
 # =============================================================== ssl
@@ -483,9 +512,11 @@ def cert_expiring(days, now):
     return {"notAfter": exp.strftime("%b %d %H:%M:%S %Y GMT")}
 
 
-def ssl_check(fetch, **cfg):
+def ssl_check(fetch, sleeps=None, **cfg):
     cfg.setdefault("domains", ["example.com"])
-    return SSLCheck(section("ssl", **cfg), fetch=fetch, clock=lambda: NOW).run()
+    sleeps = [] if sleeps is None else sleeps
+    return SSLCheck(section("ssl", **cfg), fetch=fetch, clock=lambda: NOW,
+                    sleep=sleeps.append).run()
 
 
 @pytest.mark.parametrize("days,ok,sev", [
@@ -525,6 +556,38 @@ def test_ssl_connection_errors(exc):
     assert r.message.startswith("cannot check certificate of example.com:443")
 
 
+def test_ssl_connection_error_is_retried_once_before_alerting():
+    calls, sleeps = [], []
+
+    def fetch(h, p, t):
+        calls.append(h)
+        raise ConnectionResetError("reset")
+    [r] = ssl_check(fetch, sleeps)
+    assert not r.ok and len(calls) == 2 and sleeps == [3.0]
+
+
+def test_ssl_transient_connection_error_does_not_alert():
+    calls = []
+
+    def fetch(h, p, t):
+        calls.append(h)
+        if len(calls) == 1:
+            raise socket.timeout("blip")
+        return cert_expiring(60, NOW)
+    [r] = ssl_check(fetch)
+    assert r.ok and len(calls) == 2
+
+
+def test_ssl_verification_failure_is_not_retried():
+    calls = []
+
+    def fetch(h, p, t):
+        calls.append(h)
+        raise CertVerifyError("self-signed certificate")
+    [r] = ssl_check(fetch)
+    assert r.severity == "critical" and len(calls) == 1
+
+
 def test_ssl_custom_port_and_thresholds():
     seen = []
 
@@ -560,9 +623,15 @@ PROC_TCP6 = """\
 """
 
 
-def ports(tcp=PROC_TCP, tcp6=PROC_TCP6, **cfg):
+USERS = {0: "root", 113: "postgres", 1000: "deploy", 101: "systemd-resolve"}
+
+
+def ports(tcp=PROC_TCP, tcp6=PROC_TCP6, owners=None, **cfg):
     files = {"/proc/net/tcp": tcp, "/proc/net/tcp6": tcp6}
-    return PortsCheck(section("ports", **cfg), read_file=files.get).run()
+    return PortsCheck(section("ports", **cfg), read_file=files.get,
+                      user_name=lambda uid: USERS.get(uid, "uid %d" % uid),
+                      find_owners=lambda inodes: {i: v for i, v in (owners or {}).items()
+                                                  if i in inodes}).run()
 
 
 def test_ports_decode_addr():
@@ -574,15 +643,70 @@ def test_ports_decode_addr():
 
 def test_ports_parse_only_listen_state():
     assert parse_proc_net(PROC_TCP, socket.AF_INET) == {
-        ("0.0.0.0", 22), ("127.0.0.1", 5432), ("0.0.0.0", 8080), ("127.0.0.53", 53)}
+        Listener("0.0.0.0", 22, 0, 1), Listener("127.0.0.1", 5432, 113, 2),
+        Listener("0.0.0.0", 8080, 1000, 3), Listener("127.0.0.53", 53, 101, 5)}
+
+
+def test_ports_parse_accepts_line_iterators_and_garbage():
+    lines = iter(PROC_TCP.splitlines() + ["garbage", "   9: ZZZZ:0016 0:0 0A x"])
+    assert len(parse_proc_net(lines, socket.AF_INET)) == 4
+
+
+def test_ports_parse_short_lines_have_no_owner():
+    assert parse_proc_net(PROC_TCP6, socket.AF_INET6) == {
+        Listener("::", 22), Listener("::1", 6379), Listener("::", 443)}
 
 
 def test_ports_default_allowlist_ignores_loopback():
     results = ports()
     assert [(r.key, r.ok, r.severity) for r in results] == [
         ("ports:tcp/443", False, "warning"), ("ports:tcp/8080", False, "warning")]
-    assert results[1].message == "unexpected TCP listener on port 8080 (0.0.0.0)"
+    assert results[1].message == "unexpected TCP listener on port 8080 (0.0.0.0), user deploy"
     assert results[0].message == "unexpected TCP listener on port 443 (::)"
+
+
+def test_ports_reports_process_when_resolvable():
+    [_, r] = ports(owners={3: "python3 (pid 4242)"})
+    assert r.message == ("unexpected TCP listener on port 8080 (0.0.0.0), user deploy, "
+                         "process python3 (pid 4242)")
+
+
+def test_ports_process_lookup_is_cached_per_socket():
+    calls = []
+
+    def find(inodes):
+        calls.append(set(inodes))
+        return {}
+    files = {"/proc/net/tcp": PROC_TCP, "/proc/net/tcp6": None}
+    check = PortsCheck(section("ports"), read_file=files.get, find_owners=find,
+                       user_name=str)
+    check.run()
+    check.run()
+    assert calls == [{3}]  # scanned once, although permission was denied
+    files["/proc/net/tcp"] = PROC_TCP.replace("1000        0 3 1", "1000        0 77 1")
+    check.run()
+    assert calls == [{3}, {77}]  # a new socket on the port is looked up again
+    assert set(check._owners) == {77}
+
+
+def test_find_socket_owners(tmp_path):
+    from qorovul.checks.ports import find_socket_owners
+    for pid, comm, links in (("10", "nginx", {"3": "socket:[555]", "4": "/dev/null"}),
+                             ("11", "sshd", {"3": "socket:[777]"})):
+        fd = tmp_path / pid / "fd"
+        fd.mkdir(parents=True)
+        (tmp_path / pid / "comm").write_text(comm + "\n")
+        for name, target in links.items():
+            os.symlink(target, str(fd / name))
+    (tmp_path / "self").mkdir()
+    (tmp_path / "12").mkdir()  # process without readable fd dir
+    assert find_socket_owners({555, 999}, proc=str(tmp_path)) == {555: "nginx (pid 10)"}
+    assert find_socket_owners({1}, proc=str(tmp_path / "missing")) == {}
+
+
+def test_ports_unknown_uid_is_shown_numerically():
+    from qorovul.checks.ports import _user_name
+    assert _user_name(4000000000) == "uid 4000000000"
 
 
 def test_ports_fully_allowed():
@@ -609,7 +733,7 @@ def test_ports_address_allow_does_not_cover_other_addresses():
 def test_ports_groups_addresses_per_port():
     tcp6 = PROC_TCP6.replace(":01BB", ":1F90")  # 8080 on :: as well
     [r] = ports(tcp6=tcp6, allowed=[22])
-    assert r.message == "unexpected TCP listener on port 8080 (0.0.0.0, ::)"
+    assert r.message == "unexpected TCP listener on port 8080 (0.0.0.0, ::), user deploy"
 
 
 def test_ports_ipv4_mapped_loopback_is_loopback():

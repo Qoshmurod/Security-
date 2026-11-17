@@ -475,3 +475,97 @@ def test_policy_from_config():
     assert p.cooldown_for("ssh") == 300 and p.cooldown_for("disk") == 3600
     assert p.recovery_enabled("ssh") is False and p.recovery_enabled("disk") is True
     assert p.quiet_hours.enabled
+
+
+# ---------------------------------------------------- confirm_cycles
+
+def confirm(n, **kw):
+    return Harness(per_check={"service": {"confirm_cycles": n}}, **kw)
+
+
+def test_confirm_cycles_delays_first_alert():
+    h = confirm(2)
+    assert h.cycle(T0, fail("service:nginx"), check="service") == []
+    assert h.cycle(T0 + 30, fail("service:nginx"), check="service") == [
+        (ALERT, "service:nginx", "warning")]
+    assert h.rec("service:nginx")["since"] == T0  # incident started at first sighting
+    assert h.cycle(T0 + 60, fail("service:nginx"), check="service") == []
+
+
+def test_confirm_cycles_blip_is_never_reported():
+    # e.g. a unit caught "activating" during a routine restart, or at boot
+    h = confirm(2)
+    assert h.cycle(T0, fail("service:nginx"), check="service") == []
+    assert h.cycle(T0 + 30, ok("service:nginx"), check="service") == []
+    assert h.cycle(T0 + 60, ok("service:nginx"), check="service") == []
+    assert h.rec("service:nginx")["status"] == "ok"
+
+
+def test_confirm_cycles_needs_consecutive_failures():
+    h = confirm(3, recovery_cycles=2)
+    seq = [fail, fail, ok, fail, fail]
+    for i, f in enumerate(seq):
+        assert h.cycle(T0 + 30 * i, f("service:x"), check="service") == []
+    assert h.cycle(T0 + 150, fail("service:x"), check="service") == [
+        (ALERT, "service:x", "warning")]
+
+
+def test_confirm_cycles_only_applies_to_its_check():
+    h = confirm(5)
+    assert h.cycle(T0, fail("disk:/"), check="disk") == [(ALERT, "disk:/", "warning")]
+
+
+def test_confirm_cycles_does_not_delay_escalation_or_recovery():
+    h = confirm(2)
+    h.cycle(T0, fail("service:x"), check="service")
+    h.cycle(T0 + 30, fail("service:x"), check="service")
+    assert h.cycle(T0 + 60, fail("service:x", sev="critical"), check="service") == [
+        (ESCALATED, "service:x", "critical")]
+    assert h.cycle(T0 + 90, ok("service:x"), check="service") == [
+        (RECOVERED, "service:x", "critical")]
+
+
+def test_records_from_older_versions_without_fail_streak_still_work():
+    h = confirm(3)
+    h.engine.observe("service", [fail("service:x")], T0)
+    del h.engine.records["service:x"]["fail_streak"]  # state.json written by 0.1.0
+    assert [e.kind for e in h.engine.pending(T0)] == [ALERT]
+
+
+def test_policy_confirm_defaults_from_config():
+    from qorovul.config import validate
+    p = Policy.from_config(validate({"checks": {"ports": {"confirm_cycles": 4}}}, env={}))
+    assert (p.confirm_for("service"), p.confirm_for("disk"), p.confirm_for("ports")) == (2, 1, 4)
+    assert p.confirm_for("memory") == 3
+
+
+# ---------------------------------------------------- strict loading
+
+def test_unreadable_state_is_not_renamed(tmp_path, monkeypatch):
+    import builtins
+    path = tmp_path / "state.json"
+    path.write_text('{"version": 1, "keys": {}}')
+    real_open = builtins.open
+
+    def deny(file, *a, **k):
+        if str(file) == str(path):
+            raise PermissionError(13, "Permission denied")
+        return real_open(file, *a, **k)
+    monkeypatch.setattr(builtins, "open", deny)
+    assert StateStore(str(path)).load() == {}
+    assert path.exists() and not (tmp_path / "state.json.corrupt").exists()
+    from qorovul.state import StateError
+    with pytest.raises(StateError, match="Permission denied"):
+        StateStore(str(path)).load(strict=True)
+
+
+def test_strict_load_reports_corruption_without_touching_the_file(tmp_path):
+    from qorovul.state import StateError
+    path = tmp_path / "state.json"
+    path.write_text("{oops")
+    with pytest.raises(StateError, match="not valid JSON"):
+        StateStore(str(path)).load(strict=True)
+    assert path.read_text() == "{oops"
+    path.write_text("[]")
+    with pytest.raises(StateError, match="unexpected format"):
+        StateStore(str(path)).load(strict=True)

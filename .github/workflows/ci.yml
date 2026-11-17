@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: pyflakes
+        run: pip install pyflakes && python -m pyflakes qorovul tests
+      - name: shellcheck
+        run: shellcheck install.sh tests/integration/run.sh
+      - name: systemd unit
+        run: systemd-analyze verify --man=no ./qorovul.service 2>&1 | grep -v "is not executable" | (! grep .)
+
+  unit:
+    name: unit tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install '.[test]'
+      - run: python -m pytest -q
+
+  # The whole product on real systemd: install.sh, the hardened unit, every
+  # check, alert discipline across restarts, watchdog, re-install, uninstall.
+  integration-vm:
+    name: integration (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+      - name: prerequisites
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q openssh-server openssl python3-venv
+      - run: sudo QOROVUL_CI=1 tests/integration/run.sh
+
+  integration-container:
+    name: integration (${{ matrix.distro }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: debian-12
+            image: debian:12
+            init: /sbin/init
+            setup: >-
+              apt-get update -q &&
+              DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends
+              systemd systemd-sysv dbus openssh-server openssh-client python3 python3-venv
+              openssl ca-certificates curl procps iproute2
+          - distro: almalinux-9
+            image: almalinux:9
+            init: /usr/sbin/init
+            setup: >-
+              dnf install -y -q systemd openssh-server openssh-clients python3 openssl
+              ca-certificates procps-ng util-linux shadow-utils iproute findutils
+    steps:
+      - uses: actions/checkout@v4
+      - name: build a systemd image
+        run: |
+          printf 'FROM %s\nRUN %s\nCMD ["%s"]\n' \
+            "${{ matrix.image }}" "${{ matrix.setup }}" "${{ matrix.init }}" > Dockerfile.ci
+          docker build -q -t qci -f Dockerfile.ci .
+      - name: boot systemd
+        run: |
+          docker run -d --name qci --privileged --cgroupns=host \
+            -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock --tmpfs /tmp \
+            -v "$PWD":/src:ro qci
+          for i in $(seq 1 60); do
+            state="$(docker exec qci systemctl is-system-running 2>/dev/null || true)"
+            case "$state" in running|degraded) echo "systemd: $state"; exit 0 ;; esac
+            sleep 1
+          done
+          docker exec qci systemctl --failed --no-pager || true
+          exit 1
+      - run: docker exec -e QOROVUL_CI=1 qci bash /src/tests/integration/run.sh

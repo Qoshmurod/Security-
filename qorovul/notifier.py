@@ -2,6 +2,7 @@
 
 import html
 import logging
+import re
 import time
 from datetime import datetime
 from typing import Any, Callable, List, Optional, Sequence
@@ -10,7 +11,14 @@ from .state import ALERT, ESCALATED, RECOVERED, REMINDER, Event
 
 log = logging.getLogger(__name__)
 
-MAX_MESSAGE = 4000  # Telegram's hard limit is 4096; leave headroom for markup
+MAX_MESSAGE = 4000  # Telegram's hard limit is 4096; leave headroom
+# Caps on untrusted/variable text.  Escaping can grow text up to 5x ("&" ->
+# "&amp;"), so these keep even a worst-case single event within MAX_MESSAGE
+# without ever cutting through an HTML tag or entity.
+MAX_EVENT_TEXT = 500
+MAX_KEY_TEXT = 120
+MAX_HOST_TEXT = 64
+_TAG_RE = re.compile(r"<[^>]+>")
 ICONS = {"critical": "\U0001F534", "warning": "\U0001F7E0", "info": "\U0001F535"}
 ICON_RECOVERED = "✅"
 ICON_REMINDER = "\U0001F501"
@@ -39,10 +47,24 @@ def _clock(ts: Optional[float]) -> str:
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
 
 
+def _clip(text: str, limit: int) -> str:
+    text = " ".join(str(text).split())  # one line, no control characters
+    return text if len(text) <= limit else text[: limit - 1] + "\u2026"
+
+
+def _esc(text: str, limit: int) -> str:
+    return html.escape(_clip(text, limit), quote=False)
+
+
+def to_plain(text: str) -> str:
+    """Strip our HTML markup (fallback when Telegram refuses to parse it)."""
+    return html.unescape(_TAG_RE.sub("", text))
+
+
 def format_event(ev: Event) -> str:
     """Render one event as a Telegram HTML block."""
-    key = html.escape(ev.key)
-    msg = html.escape(ev.message)
+    key = _esc(ev.key, MAX_KEY_TEXT)
+    msg = _esc(ev.message, MAX_EVENT_TEXT)
     sev = ev.severity.upper()
     if ev.kind == RECOVERED:
         head = "%s <b>RECOVERED</b> <code>%s</code>" % (ICON_RECOVERED, key)
@@ -60,7 +82,7 @@ def format_event(ev: Event) -> str:
 
 
 def format_header(hostname: str) -> str:
-    return "%s <b>%s</b>" % (ICON_HOST, html.escape(hostname))
+    return "%s <b>%s</b>" % (ICON_HOST, _esc(hostname, MAX_HOST_TEXT))
 
 
 def chunk_events(events: Sequence[Event], hostname: str,
@@ -83,12 +105,8 @@ def chunk_events(events: Sequence[Event], hostname: str,
     return chunks
 
 
-def render(events: Sequence[Event], hostname: str, limit: Optional[int] = None) -> str:
-    limit = limit or MAX_MESSAGE
-    text = "\n\n".join([format_header(hostname)] + [format_event(e) for e in events])
-    if len(text) > limit:  # a single gigantic message: truncate rather than fail
-        text = text[: limit - 1] + "…"
-    return text
+def render(events: Sequence[Event], hostname: str) -> str:
+    return "\n\n".join([format_header(hostname)] + [format_event(e) for e in events])
 
 
 class TelegramNotifier:
@@ -113,9 +131,19 @@ class TelegramNotifier:
         return str(text).replace(self.token, "<token>") if self.token else str(text)
 
     def send_text(self, text: str) -> bool:
-        """Send one message. Returns True when Telegram accepted it."""
-        payload = {"chat_id": self.chat_id, "text": text, "parse_mode": "HTML",
-                   "disable_web_page_preview": True}
+        """Send one HTML message. Returns True when Telegram accepted it."""
+        status = self._post({"chat_id": self.chat_id, "text": text, "parse_mode": "HTML",
+                             "disable_web_page_preview": True})
+        if status == "unparsable":
+            # Should not happen (everything is escaped), but an alert that
+            # arrives without formatting beats one that never arrives.
+            log.warning("telegram could not parse the message markup; resending as plain text")
+            status = self._post({"chat_id": self.chat_id, "text": to_plain(text)[:4096],
+                                 "disable_web_page_preview": True})
+        return status == "ok"
+
+    def _post(self, payload: dict) -> str:
+        """POST with retries. Returns "ok", "unparsable" or "failed"."""
         for attempt in range(1, self.attempts + 1):
             delay = float(2 ** (attempt - 1))
             try:
@@ -125,20 +153,23 @@ class TelegramNotifier:
                             attempt, self.attempts, self._redact(exc))
             else:
                 if resp.status_code == 200:
-                    return True
+                    return "ok"
                 desc = self._describe(resp)
                 if resp.status_code == 429:
                     delay = min(float(self._retry_after(resp) or delay), 60.0)
                 elif 400 <= resp.status_code < 500:
+                    if resp.status_code == 400 and "parse" in desc.lower() \
+                            and "parse_mode" in payload:
+                        return "unparsable"
                     # Bad token, wrong chat id, bot blocked: retrying will not help.
                     log.error("telegram rejected message (HTTP %d): %s",
                               resp.status_code, desc)
-                    return False
+                    return "failed"
                 log.warning("telegram send failed (attempt %d/%d, HTTP %d): %s",
                             attempt, self.attempts, resp.status_code, desc)
             if attempt < self.attempts:
                 self.sleep(delay)
-        return False
+        return "failed"
 
     @staticmethod
     def _json(resp: Any) -> dict:
@@ -174,4 +205,5 @@ class TelegramNotifier:
 
 
 __all__ = ["TelegramNotifier", "format_event", "render", "chunk_events", "human_duration",
+           "to_plain",
            "ALERT", "ESCALATED", "REMINDER", "RECOVERED"]

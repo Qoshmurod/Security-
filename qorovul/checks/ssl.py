@@ -41,12 +41,19 @@ class SSLCheck(Check):
 
     name = "ssl"
 
+    # A single failed connection is usually a network blip, and this check
+    # only runs hourly, so try again shortly before calling it a problem.
+    CONNECT_ATTEMPTS = 2
+    RETRY_DELAY = 3.0
+
     def __init__(self, config: Dict[str, Any],
                  fetch: Callable[[str, int, float], Dict[str, Any]] = fetch_cert,
-                 clock: Callable[[], float] = time.time) -> None:
+                 clock: Callable[[], float] = time.time,
+                 sleep: Callable[[float], None] = time.sleep) -> None:
         super().__init__(config)
         self.fetch = fetch
         self.clock = clock
+        self.sleep = sleep
 
     def run(self) -> List[CheckResult]:
         results = []
@@ -57,14 +64,20 @@ class SSLCheck(Check):
         return results
 
     def _check_one(self, key: str, host: str, port: int) -> CheckResult:
-        try:
-            cert = self.fetch(host, port, self.config["timeout"])
-        except CertVerifyError as exc:
-            return CheckResult(key, False, "critical",
-                               "%s certificate is not valid: %s" % (host, exc))
-        except (OSError, ssl.SSLError) as exc:
-            return CheckResult(key, False, self.config["connect_error_severity"],
-                               "cannot check certificate of %s:%d: %s" % (host, port, exc))
+        cert = None
+        for attempt in range(1, self.CONNECT_ATTEMPTS + 1):
+            try:
+                cert = self.fetch(host, port, self.config["timeout"])
+                break
+            except CertVerifyError as exc:
+                return CheckResult(key, False, "critical",
+                                   "%s certificate is not valid: %s" % (host, exc))
+            except (OSError, ssl.SSLError) as exc:
+                if attempt < self.CONNECT_ATTEMPTS:
+                    self.sleep(self.RETRY_DELAY)
+                    continue
+                return CheckResult(key, False, self.config["connect_error_severity"],
+                                   "cannot check certificate of %s:%d: %s" % (host, port, exc))
         expires = ssl.cert_time_to_seconds(cert["notAfter"])
         days = (expires - self.clock()) / 86400.0
         date = datetime.fromtimestamp(expires, timezone.utc).strftime("%Y-%m-%d")

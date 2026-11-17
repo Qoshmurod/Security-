@@ -8,6 +8,7 @@ in ``state.json``::
     message           latest message (failing or ok)
     since             when the current incident started (epoch seconds)
     ok_streak         consecutive ok observations while still "failing"
+    fail_streak       consecutive failing observations (for confirm_cycles)
     last_notified     when we last told the user about this incident
     notified_severity severity of that notification (None = not yet notified)
     pending_recovery  incident cleared but RECOVERED not delivered yet
@@ -20,7 +21,8 @@ hours, ...) is therefore simply still due on the next cycle - no separate
 retry queue exists, and a restart cannot lose or duplicate one.
 
 Rules:
-  * new failure            -> ALERT once (if severity >= min and not quiet)
+  * new failure            -> ALERT once (if severity >= min and not quiet),
+                              after ``confirm_cycles`` consecutive failing runs
   * still failing          -> nothing, until ``cooldown`` since last notice -> REMINDER
   * severity went up       -> ESCALATED immediately (ignores cooldown)
   * ok for recovery_cycles -> RECOVERED, but only if the user was alerted
@@ -110,7 +112,8 @@ class Policy:
             recovery_cycles=a["recovery_cycles"], send_recovery=a["send_recovery"],
             quiet_hours=QuietHours(q["enabled"], q["start"], q["end"]),
             per_check={name: {"cooldown": c.get("cooldown"),
-                              "send_recovery": c.get("send_recovery")}
+                              "send_recovery": c.get("send_recovery"),
+                              "confirm_cycles": c.get("confirm_cycles")}
                        for name, c in cfg["checks"].items()},
         )
 
@@ -124,6 +127,10 @@ class Policy:
     def recovery_enabled(self, check: str) -> bool:
         return self._override(check, "send_recovery", self.send_recovery)
 
+    def confirm_for(self, check: str) -> int:
+        """Consecutive failing runs required before the first ALERT."""
+        return self._override(check, "confirm_cycles", 1)
+
     def held_by_quiet_hours(self, severity: str, now: float) -> bool:
         return severity != "critical" and self.quiet_hours.active(self.localtime(now))
 
@@ -133,6 +140,10 @@ class Policy:
         return not self.held_by_quiet_hours(severity, now)
 
 
+class StateError(Exception):
+    """The state file exists but cannot be used."""
+
+
 class StateStore:
     """JSON file persistence with atomic replace."""
 
@@ -140,16 +151,29 @@ class StateStore:
         self.path = path
         self._last_written = None  # type: Optional[str]
 
-    def load(self) -> Dict[str, Dict[str, Any]]:
+    def load(self, strict: bool = False) -> Dict[str, Dict[str, Any]]:
+        """Read the state file.
+
+        The daemon must keep monitoring whatever happens to this file, so by
+        default problems are logged and an empty state is returned.  With
+        ``strict`` (used by ``qorovul status``) they raise ``StateError``.
+        """
         try:
             with open(self.path) as fh:
                 data = json.load(fh)
         except FileNotFoundError:
             return {}
-        except (OSError, ValueError) as exc:
-            # Corrupt or unreadable state must never stop monitoring.
+        except OSError as exc:
+            # Unreadable (permissions, I/O error): leave the file alone.
+            if strict:
+                raise StateError("cannot read state %s: %s" % (self.path, exc.strerror or exc))
+            log.error("cannot read state %s (%s); starting with empty state", self.path, exc)
+            return {}
+        except ValueError as exc:
+            if strict:
+                raise StateError("state %s is not valid JSON: %s" % (self.path, exc))
             backup = self.path + ".corrupt"
-            log.error("cannot read state %s (%s); starting fresh, old file kept as %s",
+            log.error("state %s is corrupt (%s); starting fresh, old file kept as %s",
                       self.path, exc, backup)
             try:
                 os.replace(self.path, backup)
@@ -157,6 +181,8 @@ class StateStore:
                 pass
             return {}
         if not isinstance(data, dict) or not isinstance(data.get("keys"), dict):
+            if strict:
+                raise StateError("state %s has an unexpected format" % self.path)
             log.error("state %s has unexpected format; starting fresh", self.path)
             return {}
         return data["keys"]
@@ -226,7 +252,7 @@ class AlertEngine:
     def _new_record(self, check: str) -> Dict[str, Any]:
         return {
             "check": check, "status": "ok", "severity": "info", "message": "",
-            "since": None, "last_seen": None, "ok_streak": 0,
+            "since": None, "last_seen": None, "ok_streak": 0, "fail_streak": 0,
             "last_notified": None, "notified_severity": None, "notify_count": 0,
             "pending_recovery": False, "last_event": None,
         }
@@ -254,6 +280,7 @@ class AlertEngine:
         rec["severity"] = r.severity
         rec["message"] = r.message
         rec["ok_streak"] = 0
+        rec["fail_streak"] = rec.get("fail_streak", 0) + 1
         rec["last_seen"] = now
 
     def _observe_ok(self, check: str, key: str, message: str, now: float) -> None:
@@ -264,6 +291,7 @@ class AlertEngine:
             rec["last_seen"] = now
             return
         rec["check"] = check
+        rec["fail_streak"] = 0
         if rec["status"] == "failing":
             rec["ok_streak"] += 1
             if rec["ok_streak"] < self.policy.recovery_cycles:
@@ -303,6 +331,9 @@ class AlertEngine:
                 return None
             notified = rec["notified_severity"]
             if notified is None:
+                # Records written before fail_streak existed count as confirmed.
+                if rec.get("fail_streak", 1 << 30) < p.confirm_for(rec["check"]):
+                    return None  # seen failing, but not for long enough yet
                 kind = ALERT
             elif severity_rank(sev) > severity_rank(notified):
                 kind = ESCALATED

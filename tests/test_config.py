@@ -87,9 +87,23 @@ def test_all_errors_reported_together():
     ({"telegram": {"bot_token": "nope"}}, "does not look like a bot token"),
     ({"telegram": {"chat_id": "my chat"}}, "telegram.chat_id"),
     ({"checks": []}, "checks: expected a mapping"),
+    ({"heartbeat": {"url": "hc-ping.com/abc"}}, "heartbeat.url: expected an http:// or https://"),
+    ({"heartbeat": {"interval": "5s"}}, "heartbeat.interval: must be at least 30s"),
+    ({"checks": {"service": {"confirm_cycles": 0}}}, "checks.service.confirm_cycles"),
 ])
 def test_validation_errors(data, needle):
     assert needle in errors_of(data)
+
+
+def test_heartbeat_and_confirm_defaults():
+    cfg = validate({}, env={})
+    assert cfg["heartbeat"] == {"url": "", "interval": 300, "timeout": 10}
+    assert cfg["checks"]["service"]["confirm_cycles"] == 2
+    assert cfg["checks"]["memory"]["confirm_cycles"] == 3  # = sustained_cycles
+    assert all(cfg["checks"][n]["confirm_cycles"] == 1
+               for n in ("disk", "ssh", "ssl", "ports"))
+    cfg = validate({"heartbeat": {"url": " https://hc-ping.com/uuid "}}, env={})
+    assert cfg["heartbeat"]["url"] == "https://hc-ping.com/uuid"
 
 
 def test_quiet_hours_normalized():

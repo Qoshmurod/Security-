@@ -38,6 +38,16 @@ telegram:
   # Change only if you reach Telegram through a proxy/mirror.
   api_url: https://api.telegram.org
 
+# Optional dead-man's switch. Qorovul runs on the machine it watches, so if
+# the whole server dies (power, kernel panic, network cut) it cannot tell you.
+# Give it a ping URL from a heartbeat service (healthchecks.io, Uptime Kuma
+# "push" monitor, cronitor, ...) and that service alerts you when the pings
+# STOP. Leave empty to disable. The ping is sent whatever the checks found.
+heartbeat:
+  url: ""
+  interval: 5m
+  timeout: 10s
+
 alerts:
   # Lowest severity that is sent: info | warning | critical.
   min_severity: warning
@@ -68,6 +78,9 @@ alerts:
 #                  ssl defaults to 1h)
 #   cooldown:      override alerts.cooldown for this check
 #   send_recovery: override alerts.send_recovery for this check
+#   confirm_cycles: consecutive failing runs before the first alert
+#                  (default 1; service: 2, so a unit caught mid-restart or
+#                  still starting at boot is not reported)
 # ---------------------------------------------------------------------------
 checks:
 
@@ -77,9 +90,11 @@ checks:
     enabled: true
     threshold: 85            # warning at >= 85%
     critical_threshold: 95   # critical at >= 95% (null = never critical)
-    # Only watch these mountpoints (empty = all real filesystems).
+    # Empty = every local disk-backed filesystem (network mounts such as NFS
+    # and pseudo filesystems such as tmpfs are skipped). List paths here to
+    # watch exactly those instead, whatever their type, e.g. [/, /mnt/nfs].
     mountpoints: []
-    # Ignored when `mountpoints` is empty:
+    # Used only when `mountpoints` is empty:
     exclude_fstypes: [tmpfs, devtmpfs, squashfs, overlay, iso9660, ramfs, autofs, nsfs, fuse.lxcfs]
     exclude_mountpoints: [/snap, /var/lib/docker]   # also excludes everything below them
 
@@ -92,8 +107,9 @@ checks:
     critical_threshold: 97   # null = never critical
     sustained_cycles: 3      # 3 x 30s = 90s of sustained pressure
 
-  # Alert when a systemd unit is not active (failed, inactive, activating...).
-  # Names without a suffix get ".service". Key: service:<unit>
+  # Alert when a systemd unit is not active (failed, inactive, activating...)
+  # on two consecutive checks. Names without a suffix get ".service".
+  # Key: service:<unit>
   service:
     enabled: true
     units: []
@@ -138,7 +154,9 @@ checks:
     connect_error_severity: warning
     interval: 1h
 
-  # Alert when a TCP port is listening that is not allowlisted.
+  # Alert when a TCP port is listening that is not allowlisted. The alert
+  # names the user that owns the socket (and the process, if permitted - see
+  # README "Permissions").
   # Entries: a port (any address) or "address:port" (exact bind address).
   # Key: ports:tcp/<port>
   ports:

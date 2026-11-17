@@ -5,7 +5,11 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+# qorovul tells systemd when it is ready and then pings the watchdog after
+# every cycle; if it ever hangs, systemd kills and restarts it.
+Type=notify
+NotifyAccess=main
+WatchdogSec=10min
 User=qorovul
 Group=qorovul
 # Read access to auth.log / the journal comes from the qorovul user's
@@ -13,6 +17,7 @@ Group=qorovul
 ExecStart=/opt/qorovul/venv/bin/qorovul run
 Restart=on-failure
 RestartSec=15
+TimeoutStartSec=60
 # Exit code 2 = invalid configuration: restarting will not fix it.
 RestartPreventExitStatus=2
 Environment=PYTHONUNBUFFERED=1

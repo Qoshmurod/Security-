@@ -1,7 +1,9 @@
 import logging
 
-from qorovul.notifier import (TelegramNotifier, chunk_events, format_event, human_duration,
-                              render)
+import re
+
+from qorovul.notifier import (MAX_MESSAGE, TelegramNotifier, chunk_events, format_event,
+                              human_duration, render, to_plain)
 from qorovul.state import ALERT, ESCALATED, RECOVERED, REMINDER, Event
 
 TOKEN = "123456789:AAEsecretsecretsecretsecretsecret"
@@ -89,9 +91,28 @@ def test_chunking_respects_limit():
     assert len(chunks) > 1
 
 
-def test_render_truncates_single_oversized_event():
-    text = render([ev(msg="y" * 10000)], "host", limit=500)
-    assert len(text) == 500 and text.endswith("…")
+def test_worst_case_event_always_fits_one_message():
+    # Every character needs escaping, in every variable field.
+    worst = ev(key="&" * 5000, msg="<" * 50000)
+    text = render([worst], "&" * 500)
+    assert len(text) <= MAX_MESSAGE
+    assert chunk_events([worst, worst], "&" * 500) == [[worst], [worst]]
+
+
+def test_long_text_is_clipped_without_breaking_markup():
+    text = format_event(ev(msg="a & b " * 500))
+    assert text.count("<b>") == text.count("</b>") == 1
+    assert text.count("<i>") == text.count("</i>") == 1
+    assert "\u2026" in text
+    assert not re.search(r"&(?!amp;|lt;|gt;)", text)  # no entity cut in half
+
+
+def test_multiline_message_is_flattened():
+    assert "line one line two" in format_event(ev(msg="line one\n\tline two"))
+
+
+def test_to_plain():
+    assert to_plain("<b>A &amp; B</b> <code>x&lt;y</code>") == "A & B x<y"
 
 
 def test_send_success_payload():
@@ -134,6 +155,22 @@ def test_client_error_is_not_retried(caplog):
         assert n.send_text("hi") is False
     assert len(s.calls) == 1 and sleeps == []
     assert "chat not found" in caplog.text
+
+
+def test_unparsable_markup_falls_back_to_plain_text():
+    n, s, _ = notifier(Resp(400, {"description": "Bad Request: can't parse entities: bad tag"}),
+                       Resp(200))
+    assert n.send_text("<b>disk &amp; co</b>") is True
+    assert "parse_mode" in s.calls[0][1]
+    assert s.calls[1][1] == {"chat_id": "-100123", "text": "disk & co",
+                             "disable_web_page_preview": True}
+
+
+def test_plain_text_fallback_can_also_fail():
+    n, s, _ = notifier(Resp(400, {"description": "can't parse entities"}),
+                       Resp(400, {"description": "Bad Request: chat not found"}))
+    assert n.send_text("<b>x</b>") is False
+    assert len(s.calls) == 2
 
 
 def test_non_json_error_body():

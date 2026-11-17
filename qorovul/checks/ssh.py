@@ -17,6 +17,7 @@ is compared against ``failures``.
 """
 
 import ipaddress
+import logging
 import os
 import re
 import shutil
@@ -28,14 +29,24 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from .base import Check, CheckResult
 
+log = logging.getLogger(__name__)
+
 _IP = r"(?P<ip>[0-9A-Fa-f:.]+)"
+# The user name is attacker-controlled free text.  It is matched greedily so
+# that the *last* "from <ip> port <n>" on the line wins - the one sshd itself
+# appends - and a user name such as "root from 10.0.0.1 port 22" cannot spoof
+# the source address (and thereby dodge the per-IP count or frame another IP).
 RE_FAILED = re.compile(
-    r"Failed \S+ for (?:invalid user )?(?P<user>.*?) from " + _IP + r" port (?P<port>\d+)")
+    r"Failed (?P<method>\S+) for (?:invalid user )?(?P<user>.*) from " + _IP
+    + r" port (?P<port>\d+)")
 RE_MARKER = re.compile(
-    r"(?:Invalid user (?P<u1>.*?) from"
-    r"|Connection closed by (?:authenticating|invalid) user (?P<u2>.*?)"
-    r"|Disconnected from (?:authenticating|invalid) user (?P<u3>.*?)"
+    r"(?:Invalid user (?P<u1>.*) from"
+    r"|Connection closed by (?:authenticating|invalid) user (?P<u2>.*)"
+    r"|Disconnected from (?:authenticating|invalid) user (?P<u3>.*)"
     r") " + _IP + r" port (?P<port>\d+)")
+# rsyslog ($RepeatedMsgReduction, on by default on Ubuntu) collapses identical
+# consecutive lines into: "message repeated 3 times: [ Failed password ... ]"
+RE_REPEATED = re.compile(r"message repeated (\d+) times: \[")
 RE_SYSLOG_TS = re.compile(r"^(?P<mon>[A-Z][a-z]{2}) +(?P<day>\d{1,2}) (?P<h>\d\d):(?P<m>\d\d):(?P<s>\d\d) ")
 RE_ISO_TS = re.compile(
     r"^(?P<ts>\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?P<frac>\.\d+)?(?P<tz>Z|[+-]\d\d:?\d\d)? ")
@@ -46,7 +57,7 @@ MONTHS = {m: i for i, m in enumerate(
 # Read at most this much of an existing log on first start, and per cycle.
 INITIAL_TAIL_BYTES = 2 * 1024 * 1024
 MAX_READ_BYTES = 16 * 1024 * 1024
-MAX_CONNECTIONS = 200000
+MAX_CONNECTIONS = 50000  # bounds memory during a flood (~10 MB)
 
 
 def parse_timestamp(line: str, now: float) -> Optional[float]:
@@ -88,19 +99,31 @@ def parse_timestamp(line: str, now: float) -> Optional[float]:
     return None
 
 
-def parse_line(line: str) -> Optional[Tuple[str, int, str, bool]]:
-    """Return (ip, port, user, is_failed_line) for an sshd failure line, else None."""
+def parse_line(line: str) -> Optional[Tuple[str, int, str, int]]:
+    """Parse one log line.
+
+    Returns (ip, port, user, failed) for an sshd authentication-failure line,
+    else None.  ``failed`` is the number of failed attempts the line stands
+    for: 0 for a marker line ("Invalid user ...", "Connection closed by
+    authenticating user ..."), which only proves the connection failed.
+    """
     if "sshd" not in line:
         return None
     m = RE_FAILED.search(line)
     if m:
-        failed = True
+        rep = RE_REPEATED.search(line)
+        failed = min(int(rep.group(1)), 1000) if rep else 1
+        if m.group("method") == "none":
+            # The "none" request every client sends first to list the allowed
+            # methods (logged for unknown users). Not a credential guess, but
+            # it does mark the connection as a failed one.
+            failed = 0
         user = m.group("user")
     else:
         m = RE_MARKER.search(line)
         if not m:
             return None
-        failed = False
+        failed = 0
         user = m.group("u1") or m.group("u2") or m.group("u3") or ""
     ip = m.group("ip")
     try:
@@ -131,8 +154,7 @@ class FailureWindow:
             self.conns[(ip, port)] = conn
             if len(self.conns) > MAX_CONNECTIONS:
                 self.conns.popitem(last=False)
-        if failed:
-            conn[1] += 1
+        conn[1] += failed
         if user and len(conn[2]) < 5:
             conn[2].add(user)
 
@@ -170,30 +192,52 @@ class LogTail:
         st = self.stat(self.path)
         ident = (st.st_dev, st.st_ino)
         first = self.inode is None
+        lines = []  # type: List[bytes]
         if ident != self.inode or st.st_size < self.offset:
-            # New file (first run, or rotated/truncated).
+            # New file: first run, rotated (new inode) or truncated in place.
+            if not first and ident != self.inode:
+                lines = self._drain_rotated()
             self.offset = max(0, st.st_size - INITIAL_TAIL_BYTES) if first else 0
             self.partial = b""
             self.inode = ident
-        if st.st_size == self.offset:
-            return []
-        with self.opener(self.path, "rb") as fh:
-            fh.seek(self.offset)
-            data = fh.read(MAX_READ_BYTES)
-        skip_first = first and self.offset > 0
-        self.offset += len(data)
-        data = self.partial + data
-        lines = data.split(b"\n")
-        self.partial = lines.pop()  # incomplete trailing line (or b"")
-        if skip_first and lines:
-            lines = lines[1:]  # we started mid-line
+        if st.st_size > self.offset:
+            skip_first = first and self.offset > 0  # we started mid-line
+            new = self._read_from(self.path, self.offset)
+            if skip_first and new:
+                new = new[1:]
+            lines += new
         return [ln.decode("utf-8", "replace") for ln in lines]
+
+    def _read_from(self, path: str, offset: int) -> List[bytes]:
+        with self.opener(path, "rb") as fh:
+            fh.seek(offset)
+            data = fh.read(MAX_READ_BYTES)
+        self.offset = offset + len(data)
+        lines = (self.partial + data).split(b"\n")
+        self.partial = lines.pop()  # incomplete trailing line (or b"")
+        return lines
+
+    def _drain_rotated(self) -> List[bytes]:
+        """Read what was appended to the old file between our last read and
+        its rotation (logrotate renames auth.log to auth.log.1)."""
+        rotated = self.path + ".1"
+        try:
+            st = self.stat(rotated)
+            if (st.st_dev, st.st_ino) != self.inode or st.st_size <= self.offset:
+                return []
+            return self._read_from(rotated, self.offset)
+        except OSError:
+            return []  # compressed, removed or unreadable: nothing we can do
 
 
 def _journal_lines(since: float) -> List[str]:
     proc = subprocess.run(
         ["journalctl", "--no-pager", "--quiet", "--output=short-unix",
-         "--since=@%d" % int(since), "--unit=ssh.service", "--unit=sshd.service"],
+         "--since=@%d" % int(since),
+         # Match on the syslog identifier rather than the unit name: it is the
+         # same on every distro (ssh.service, sshd.service, socket-activated
+         # sshd@...), and covers the split daemons of OpenSSH 9.8+/10.
+         "--identifier=sshd", "--identifier=sshd-session", "--identifier=sshd-auth"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         universal_newlines=True, timeout=30, check=False,
     )
@@ -223,6 +267,7 @@ class SSHCheck(Check):
         self.has_journalctl = has_journalctl or (lambda: shutil.which("journalctl") is not None)
         self.window = FailureWindow()
         self.tail = None  # type: Optional[LogTail]
+        self._source_logged = None  # type: Optional[Tuple[str, Optional[str]]]
         self.ignore = [ipaddress.ip_network(n, strict=False) for n in config["ignore_ips"]]
 
     def _source(self) -> Tuple[str, Optional[str]]:
@@ -248,6 +293,9 @@ class SSHCheck(Check):
         now = self.clock()
         cutoff = now - self.config["window"]
         kind, path = self._source()
+        if (kind, path) != self._source_logged:
+            log.info("ssh: reading %s", path if kind == "file" else "the systemd journal")
+            self._source_logged = (kind, path)
         if kind == "file":
             if self.tail is None or self.tail.path != path:
                 self.tail = LogTail(path, self.opener, self.stat)

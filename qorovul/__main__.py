@@ -54,25 +54,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _oneshot_checks(cfg: Dict[str, Any]) -> List[Any]:
-    """Checks for ``test``: memory reports the current value without sustain."""
-    import copy
-    from .checks import build_checks
-    cfg = copy.deepcopy(cfg)
-    cfg["checks"]["memory"]["sustained_cycles"] = 1
-    return build_checks(cfg)
-
-
 def cmd_test(args: argparse.Namespace) -> int:
     cfg = load(args.config)
     _setup_logging("warning")
     import html
 
+    from .checks import build_checks
     from .notifier import format_header
     from .runner import run_check
 
     failing, errored, lines = [], [], []
-    checks = _oneshot_checks(cfg)
+    checks = build_checks(cfg)
     if not checks:
         print("no checks enabled")
     for check in checks:
@@ -115,9 +107,14 @@ def _fmt_ts(ts: Optional[float]) -> str:
 
 def cmd_status(args: argparse.Namespace) -> int:
     cfg = load(args.config, missing_ok=True)
-    from .state import StateStore
+    from .state import StateError, StateStore
     path = cfg["state_file"]
-    records = StateStore(path).load()
+    try:
+        records = StateStore(path).load(strict=True)
+    except StateError as exc:
+        hint = " (try: sudo qorovul status)" if "ermission" in str(exc) else ""
+        print("qorovul: %s%s" % (exc, hint), file=sys.stderr)
+        return EXIT_CHECKS_FAILING
     if args.json:
         print(json.dumps(records, indent=2, sort_keys=True))
         return EXIT_OK

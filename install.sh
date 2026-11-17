@@ -73,24 +73,29 @@ fi
 say "using $("$PY" --version) at $PY"
 
 # --- source -----------------------------------------------------------------
+# Always build from a private copy: pip writes build files next to the
+# sources, which must not litter (or fail on a read-only) checkout.
 SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
-TMP=""
-cleanup() { [ -n "$TMP" ] && rm -rf "$TMP"; }
+WORK="$(mktemp -d)"
+cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
+SRC="$WORK/src"
+mkdir "$SRC"
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/pyproject.toml" ] && [ -d "$SCRIPT_DIR/qorovul" ]; then
-    SRC="$SCRIPT_DIR"
-    say "installing from local checkout $SRC"
+    say "installing from local checkout $SCRIPT_DIR"
+    for f in pyproject.toml README.md LICENSE config.example.yml qorovul.service qorovul; do
+        cp -R "$SCRIPT_DIR/$f" "$SRC/"
+    done
 else
     command -v curl >/dev/null || die "curl is required"
-    TMP="$(mktemp -d)"
     say "downloading $REPO ($REF)"
-    curl -fsSL "$REPO/archive/$REF.tar.gz" | tar -xz -C "$TMP" --strip-components=1 \
+    curl -fsSL "$REPO/archive/$REF.tar.gz" | tar -xz -C "$SRC" --strip-components=1 \
         || die "download failed: $REPO/archive/$REF.tar.gz"
-    SRC="$TMP"
 fi
+[ -f "$SRC/pyproject.toml" ] || die "source tree is incomplete"
 
 # --- user -------------------------------------------------------------------
 NOLOGIN="$(command -v nologin || echo /usr/sbin/nologin)"

@@ -179,12 +179,20 @@ def v_domain(v: Any) -> str:
     return s
 
 
+def v_url(v: Any) -> str:
+    s = v_str(v).strip()
+    if s and not re.match(r"^https?://[^\s/]+", s):
+        raise ValueError("expected an http:// or https:// URL")
+    return s
+
+
 def _common(enabled: bool = True) -> Dict[str, Any]:
     return {
         "enabled": (v_bool, enabled),
         "interval": (v_optional(v_duration(5)), None),
         "cooldown": (v_optional(v_duration(0)), None),
         "send_recovery": (v_optional(v_bool), None),
+        "confirm_cycles": (v_optional(v_int(1, 1000)), None),
     }
 
 
@@ -200,6 +208,11 @@ SCHEMA = {
         "chat_id": (v_str, ""),
         "timeout": (v_duration(1), 10),
         "api_url": (v_nonempty_str, "https://api.telegram.org"),
+    },
+    "heartbeat": {
+        "url": (v_url, ""),
+        "interval": (v_duration(30), "5m"),
+        "timeout": (v_duration(1), 10),
     },
     "alerts": {
         "min_severity": (SEVERITY, "warning"),
@@ -256,6 +269,9 @@ SCHEMA = {
 
 # Per-check interval defaults that differ from the global interval.
 CHECK_INTERVAL_DEFAULTS = {"ssl": 3600.0}
+# Consecutive failing runs before the first alert.  A unit caught mid-restart
+# ("activating"/"deactivating") or still starting at boot is not an incident.
+CHECK_CONFIRM_DEFAULTS = {"service": 2}
 
 
 def _apply(schema: Dict[str, Any], data: Any, path: str, errors: List[str]) -> Dict[str, Any]:
@@ -330,6 +346,10 @@ def validate(data: Any, env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     for name, section in cfg["checks"].items():
         if section["interval"] is None:
             section["interval"] = CHECK_INTERVAL_DEFAULTS.get(name, cfg["interval"])
+        if section["confirm_cycles"] is None:
+            # memory: "sustained for N cycles" is exactly a confirmation count.
+            section["confirm_cycles"] = section.get(
+                "sustained_cycles", CHECK_CONFIRM_DEFAULTS.get(name, 1))
     return cfg
 
 
