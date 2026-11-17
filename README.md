@@ -37,8 +37,8 @@ Alerts speak 14 languages (see [Languages](#languages)).
 2. **Get your chat id.** Send any message to your new bot, then open
    `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy `"chat":{"id": ...}`.
    For a group, add the bot to the group first; group ids are negative.
-3. **Install** on the server (Ubuntu 22.04+, Debian 12+, AlmaLinux/RHEL 9 and
-   similar with systemd):
+3. **Install** on the server (Ubuntu 22.04, 24.04 or 26.04, Debian 12+,
+   AlmaLinux/RHEL 9 and similar with systemd):
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/Qoshmurod/Security-/main/install.sh | sudo bash
@@ -477,8 +477,8 @@ with `QOROVUL_CI=1` and is meant for CI runners and throw-away VMs:
 sudo QOROVUL_CI=1 tests/integration/run.sh
 ```
 
-CI runs the unit tests on Python 3.9–3.13 and the integration test on
-Ubuntu 22.04, Ubuntu 24.04, Debian 12 and AlmaLinux 9.
+CI runs the unit tests on Python 3.9–3.14 and the integration test on
+Ubuntu 22.04, 24.04 and 26.04, Debian 12 and AlmaLinux 9.
 
 Out of scope, on purpose: web dashboards, metrics history, graphs, databases,
 a central hub, channels other than Telegram, auto-remediation.

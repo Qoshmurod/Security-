@@ -34,7 +34,7 @@ Qorovul은 여섯 가지를 감시합니다.
    `https://api.telegram.org/bot<TOKEN>/getUpdates`를 열어
    `"chat":{"id": ...}` 값을 복사합니다. 그룹이라면 먼저 봇을 그룹에 추가하세요.
    그룹 id는 음수입니다.
-3. **서버에 설치합니다** (systemd가 있는 Ubuntu 22.04+, Debian 12+, AlmaLinux/RHEL 9).
+3. **서버에 설치합니다** (systemd가 있는 Ubuntu 22.04, 24.04, 26.04, Debian 12+, AlmaLinux/RHEL 9).
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/Qoshmurod/Security-/main/install.sh | sudo bash

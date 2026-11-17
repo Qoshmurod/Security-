@@ -44,7 +44,7 @@ fi
 
 find_python() {
     local c
-    for c in python3.13 python3.12 python3.11 python3.10 python3.9 python3; do
+    for c in python3.14 python3.13 python3.12 python3.11 python3.10 python3.9 python3; do
         if command -v "$c" >/dev/null &&
            "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null; then
             command -v "$c"; return 0

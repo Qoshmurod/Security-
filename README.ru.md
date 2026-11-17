@@ -36,7 +36,7 @@ Qorovul следит за шестью вещами:
 2. **Узнайте chat id.** Отправьте боту любое сообщение, откройте
    `https://api.telegram.org/bot<TOKEN>/getUpdates` и возьмите `"chat":{"id": ...}`.
    Для группы сначала добавьте в неё бота; id групп отрицательные.
-3. **Установите** на сервер (Ubuntu 22.04+, Debian 12+, AlmaLinux/RHEL 9 с systemd):
+3. **Установите** на сервер (Ubuntu 22.04, 24.04 или 26.04, Debian 12+, AlmaLinux/RHEL 9 с systemd):
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/Qoshmurod/Security-/main/install.sh | sudo bash

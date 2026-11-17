@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -70,6 +70,14 @@ jobs:
               apt-get update -q &&
               DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends
               systemd systemd-sysv dbus openssh-server openssh-client python3 python3-venv
+              openssl ca-certificates curl procps iproute2
+          - distro: ubuntu-26.04
+            image: ubuntu:26.04
+            init: /sbin/init
+            setup: >-
+              apt-get update -q &&
+              DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends
+              systemd systemd-sysv dbus rsyslog openssh-server openssh-client python3 python3-venv
               openssl ca-certificates curl procps iproute2
           - distro: almalinux-9
             image: almalinux:9

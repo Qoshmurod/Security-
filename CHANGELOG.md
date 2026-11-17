@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.1 — 2026-11-17
+
+- Tested on Ubuntu 26.04 LTS (Python 3.14, systemd 259, OpenSSH 10.2, uutils
+  coreutils, sudo-rs). CI now runs the full integration test on it and the
+  unit tests on Python 3.14.
+- The installer looks for `python3.14` first.
+
 ## 1.1.0 — 2026-11-17
 
 ### Added

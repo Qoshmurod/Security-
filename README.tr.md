@@ -35,7 +35,7 @@ sonra da sürüyorsa hatırlatma gelir; sorun giderildiğinde **DÜZELDİ** mesa
    `https://api.telegram.org/bot<TOKEN>/getUpdates` adresini açıp
    `"chat":{"id": ...}` değerini alın. Grup için önce botu gruba ekleyin;
    grup id'leri negatiftir.
-3. **Sunucuya kurun** (systemd'li Ubuntu 22.04+, Debian 12+, AlmaLinux/RHEL 9):
+3. **Sunucuya kurun** (systemd'li Ubuntu 22.04, 24.04 veya 26.04, Debian 12+, AlmaLinux/RHEL 9):
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/Qoshmurod/Security-/main/install.sh | sudo bash

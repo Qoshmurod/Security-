@@ -35,7 +35,7 @@ boʻlganda esa **TIKLANDI** xabari keladi.
    `https://api.telegram.org/bot<TOKEN>/getUpdates` manzilini oching va
    `"chat":{"id": ...}` qiymatini oling. Guruh uchun avval botni guruhga
    qoʻshing; guruh ID lari manfiy boʻladi.
-3. **Serverga oʻrnating** (systemd boʻlgan Ubuntu 22.04+, Debian 12+, AlmaLinux/RHEL 9):
+3. **Serverga oʻrnating** (systemd boʻlgan Ubuntu 22.04, 24.04 yoki 26.04, Debian 12+, AlmaLinux/RHEL 9):
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/Qoshmurod/Security-/main/install.sh | sudo bash
